@@ -3,7 +3,7 @@
  * once to show the operator, and stored only as a hash.
  */
 
-import { atLeast, isRole, newId, type Principal, type Role, sessionIdleMs } from '@orderloop/core';
+import { isRole, newId, type Principal, type Role, sessionIdleMs } from '@orderloop/core';
 import { apiTokens, sessions, startsWith, users } from '@orderloop/db';
 import { and, count, desc, eq, gt, isNull, ne } from 'drizzle-orm';
 import { endAccess, endedDetail } from './access.server';
@@ -155,25 +155,6 @@ export async function addUser(
   forgetUserCount();
   await audit(request, 'team.user_added', { actor: by, target: email, detail: { role: r } });
   return { email, password };
-}
-
-export async function setRole(request: Request, by: Principal, id: string, next: unknown) {
-  const r = role(next);
-  if (r !== 'admin') await keepAnAdmin(id);
-  if (id === by.id && r !== 'admin')
-    throw new TeamError('Ask another admin to change your own role.');
-  const user = await target(id);
-  if (user.role === r) return;
-  await db().update(users).set({ role: r }).where(eq(users.id, id));
-  // Connected apps follow the role on their own (`grantPrincipal`); tokens carry theirs.
-  const ended = atLeast(r, user.role as Role)
-    ? null
-    : await endAccess(request, { id, email: user.email }, { tokens: { above: r } });
-  await audit(request, 'team.role_changed', {
-    actor: by,
-    target: user.email,
-    detail: { from: user.role, to: r, ...(ended ? endedDetail(ended) : {}) },
-  });
 }
 
 /** A person's role now, or null when they aren't on the team. */

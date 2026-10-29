@@ -1,5 +1,6 @@
 import {
   ASSISTANT_PUBLISHER,
+  type AssistantTool,
   CATEGORY_LABELS,
   isCartEvent,
   PLUGIN_CAPABILITY_LABELS,
@@ -16,18 +17,28 @@ import { Button } from '@orderloop/ui/button';
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
+import { cn } from '@orderloop/ui/lib/utils';
 import { Separator } from '@orderloop/ui/separator';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { inArray } from 'drizzle-orm';
 import { Puzzle } from 'lucide-react';
-import { useId } from 'react';
-import { data, Form, Link, useActionData, useLoaderData, useNavigation } from 'react-router';
+import { useId, useState } from 'react';
+import {
+  data,
+  Form,
+  Link,
+  useActionData,
+  useLoaderData,
+  useNavigation,
+  useRevalidator,
+} from 'react-router';
 import { Ago } from '~/components/ago';
 import { Code } from '~/components/code';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
 import { StatusDot, ToneBadge } from '~/components/status';
 import { StepUpField } from '~/components/step-up-field';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser, type StepUpMethod, stepUpMethod } from '~/lib/auth.server';
 import { BodyTooLarge, readText } from '~/lib/body';
 import { db, engine } from '~/lib/env.server';
@@ -131,7 +142,7 @@ export default function Plugins() {
             </p>
           ) : null}
           {pending.map((i) => (
-            <Review key={i.sha} install={i} stepUp={stepUp} by={names[i.uploadedBy]} />
+            <Review key={i.sha} install={i} by={names[i.uploadedBy]} />
           ))}
           {plugins.length || off.length ? (
             <>
@@ -178,11 +189,6 @@ export default function Plugins() {
     </>
   );
 }
-
-const busyWith = (state: ReturnType<typeof useNavigation>, intent: string, key: string) =>
-  state.state !== 'idle' &&
-  state.formData?.get('intent') === intent &&
-  (state.formData.get('sha') ?? state.formData.get('id')) === key;
 
 export function Upload({ publishers }: { publishers: string[] }) {
   const nav = useNavigation();
@@ -275,16 +281,14 @@ function SecretForm({
 
 function Review({
   install: i,
-  stepUp,
   by,
 }: {
   install: PluginInstallView;
-  stepUp: StepUpMethod | null;
   /** Who uploaded it, or asked the assistant for it. */
   by?: string;
 }) {
-  const nav = useNavigation();
   const m = i.manifest;
+  const [personalData, setPersonalData] = useState(false);
   const missing = m.secrets.filter(
     (s) => !s.optional && !i.secrets.find((x) => x.name === s.name)?.set,
   );
@@ -343,10 +347,7 @@ function Review({
           ))}
         </div>
       ) : null}
-      <Form method="post" className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4">
-        <input type="hidden" name="intent" value="approve" />
-        <input type="hidden" name="id" value={i.id} />
-        <input type="hidden" name="sha" value={i.sha} />
+      <div className="mt-4 flex flex-wrap items-end gap-3 border-t pt-4">
         {m.personalData === 'send' ? (
           <Field orientation="horizontal" className="w-full items-start">
             <input
@@ -354,6 +355,8 @@ function Review({
               type="checkbox"
               name="personalData"
               className="mt-0.5"
+              checked={personalData}
+              onChange={(e) => setPersonalData(e.target.checked)}
             />
             <FieldContent>
               <FieldLabel htmlFor={`${i.sha}-personal-data`} className="font-normal">
@@ -363,13 +366,13 @@ function Review({
             </FieldContent>
           </Field>
         ) : null}
-        <StepUpField method={stepUp} next="/plugins" />
-        <Button
-          type="submit"
-          disabled={missing.length > 0 || failing || busyWith(nav, 'approve', i.sha)}
+        <PluginAct
+          tool="approve_plugin"
+          input={{ pluginId: i.id, sha: i.sha, personalData }}
+          disabled={missing.length > 0 || failing}
         >
           Approve and install
-        </Button>
+        </PluginAct>
         {missing.length ? (
           <span className="text-muted-foreground text-xs">
             Set {missing.map((x) => x.name).join(', ')} first.
@@ -379,7 +382,7 @@ function Review({
             Every step needs a test case, and every case must pass first.
           </span>
         ) : null}
-      </Form>
+      </div>
     </Section>
   );
 }
@@ -400,7 +403,7 @@ const editableCases = (cases: PluginCaseResult[] | null) =>
 
 /** An assistant draft: its rule code to read, and its test cases to check, edit and run. */
 function DraftReview({ install: i }: { install: PluginInstallView }) {
-  const nav = useNavigation();
+  const [cases, setCases] = useState(() => editableCases(i.cases));
   return (
     <div className="mt-4 grid gap-3 border-t pt-4 text-sm">
       <details>
@@ -446,10 +449,7 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
           <p className="text-muted-foreground">No cases yet: add at least one below.</p>
         )}
       </div>
-      <Form method="post" className="grid gap-2">
-        <input type="hidden" name="intent" value="cases" />
-        <input type="hidden" name="id" value={i.id} />
-        <input type="hidden" name="sha" value={i.sha} />
+      <div className="grid gap-2">
         <Field className="gap-1.5">
           <FieldLabel htmlFor={`${i.sha}-cases`}>Edit the cases</FieldLabel>
           <FieldDescription id={`${i.sha}-cases-hint`} className="text-xs">
@@ -459,7 +459,8 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
           <Textarea
             id={`${i.sha}-cases`}
             name="cases"
-            defaultValue={editableCases(i.cases)}
+            value={cases}
+            onChange={(e) => setCases(e.target.value)}
             rows={10}
             spellCheck={false}
             aria-describedby={`${i.sha}-cases-hint`}
@@ -467,16 +468,11 @@ function DraftReview({ install: i }: { install: PluginInstallView }) {
           />
         </Field>
         <div>
-          <Button
-            type="submit"
-            size="sm"
-            variant="outline"
-            disabled={busyWith(nav, 'cases', i.sha)}
-          >
+          <PluginAct tool="run_plugin_cases" input={() => casesInput(i, cases)} variant="outline">
             Run cases
-          </Button>
+          </PluginAct>
         </div>
-      </Form>
+      </div>
     </div>
   );
 }
@@ -512,14 +508,15 @@ function InstallControls({
           ))}
         </div>
       ) : null}
-      <Form method="post" className="flex flex-wrap items-end gap-3">
-        <input type="hidden" name="intent" value={on ? 'disable' : 'enable'} />
-        <input type="hidden" name="id" value={current.id} />
-        <StepUpField method={stepUp} next="/plugins" />
-        <Button type="submit" size="sm" variant="outline">
+      <div className="flex flex-wrap items-end gap-3">
+        <PluginAct
+          tool="set_plugin_enabled"
+          input={{ pluginId: current.id, enabled: !on }}
+          variant="outline"
+        >
           {on ? 'Turn off' : 'Turn on'}
-        </Button>
-      </Form>
+        </PluginAct>
+      </div>
       {earlier.length ? (
         <div className="grid gap-1">
           <h3 className="font-medium text-sm">Earlier versions</h3>
@@ -534,15 +531,13 @@ function InstallControls({
                     </ItemDescription>
                   </ItemContent>
                   <ItemActions>
-                    <Form method="post" className="flex flex-wrap items-end gap-3">
-                      <input type="hidden" name="intent" value="rollback" />
-                      <input type="hidden" name="id" value={v.id} />
-                      <input type="hidden" name="sha" value={v.sha} />
-                      <StepUpField method={stepUp} next="/plugins" />
-                      <Button type="submit" size="sm" variant="outline">
-                        Roll back to {v.version}
-                      </Button>
-                    </Form>
+                    <PluginAct
+                      tool="rollback_plugin"
+                      input={{ pluginId: v.id, sha: v.sha }}
+                      variant="outline"
+                    >
+                      Roll back to {v.version}
+                    </PluginAct>
                   </ItemActions>
                 </li>
               </Item>
@@ -551,17 +546,14 @@ function InstallControls({
         </div>
       ) : null}
       <Separator />
-      <Form method="post" className="flex flex-wrap items-end gap-3">
-        <input type="hidden" name="intent" value="uninstall" />
-        <input type="hidden" name="id" value={current.id} />
-        <StepUpField method={stepUp} next="/plugins" />
-        <Button type="submit" size="sm" variant="destructive">
+      <div className="flex flex-wrap items-end gap-3">
+        <PluginAct tool="uninstall_plugin" input={{ pluginId: current.id }} variant="destructive">
           Uninstall
-        </Button>
+        </PluginAct>
         <span className="text-muted-foreground text-xs">
           Only once nothing uses it. Its secrets and stored data are deleted.
         </span>
-      </Form>
+      </div>
     </div>
   );
 }
@@ -812,5 +804,71 @@ function Deliveries({ deliveries }: { deliveries: Plugin['deliveries'] }) {
         <p className="text-muted-foreground">None yet.</p>
       )}
     </div>
+  );
+}
+
+/** A draft's cases as the tool takes them, from the text box; throws to say what doesn't read. */
+function casesInput(i: PluginInstallView, text: string) {
+  let cases: unknown;
+  try {
+    cases = JSON.parse(text);
+  } catch {
+    throw new Error('The cases aren’t JSON.');
+  }
+  if (!Array.isArray(cases)) throw new Error('The cases are a list ([ … ]).');
+  return { pluginId: i.id, sha: i.sha, cases };
+}
+
+/**
+ * One plugin change through the assistant: its card says what changes on every order, and those
+ * that need it ask the admin to prove it's them there. The page refreshes once it's done.
+ */
+function PluginAct({
+  tool,
+  input,
+  disabled,
+  variant,
+  children,
+}: {
+  tool: AssistantTool;
+  /** The tool's input, or a function that builds it (and may throw to refuse). */
+  input: unknown | (() => unknown);
+  disabled?: boolean;
+  variant?: 'outline' | 'destructive';
+  children: React.ReactNode;
+}) {
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<{ tone: 'ok' | 'bad'; text: string } | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setSaid(null);
+    try {
+      const r = await act(tool, typeof input === 'function' ? (input as () => unknown)() : input);
+      if ('declined' in r) return;
+      const done = (r.output as { done?: string } | null)?.done;
+      if (done) setSaid({ tone: 'ok', text: done });
+      revalidate();
+    } catch (e) {
+      setSaid({ tone: 'bad', text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <Button size="sm" variant={variant} disabled={disabled || busy} onClick={() => void run()}>
+        {busy ? 'Confirm it in the assistant' : children}
+      </Button>
+      {said ? (
+        <span
+          role={said.tone === 'bad' ? 'alert' : 'status'}
+          className={cn('text-xs', said.tone === 'bad' ? 'text-bad' : 'text-muted-foreground')}
+        >
+          {said.text}
+        </span>
+      ) : null}
+    </span>
   );
 }

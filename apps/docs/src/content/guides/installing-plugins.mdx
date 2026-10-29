@@ -47,7 +47,8 @@ The page is admin-only: **Plugins**, in the sidebar's **Workspace** group (on a 
    disabled until every required secret is set.
 5. If it asks for buyer details, a checkbox sends it them. It is off by default, and a plugin that
    asks for them does not run without it.
-6. Confirm who you are and select **Approve and install**. Once approved, the plugin runs on every
+6. Select **Approve and install**. The [assistant](/guides/assistant/#edits-from-a-page)'s confirm
+   card says what it runs and what it gets; confirm who you are there and confirm. Once approved, the plugin runs on every
    order whose flow uses it. The version that ran before, if any, is kept as an earlier version.
 
 ## Drafts from the assistant
@@ -78,13 +79,17 @@ to or turned on.
 ## Confirming who you are
 
 Approving, rolling back and uninstalling each ask you to prove you are the admin, because they change
-what runs on every order. The page asks for the first of these that applies to you:
+what runs on every order. They go through the assistant's confirm card, which asks for the first of
+these that applies to you:
 
 1. A current code from your authenticator app, if you sign in with two-factor.
 2. Your password.
 3. If you sign in only with single sign-on, follow **confirm it's you**. Your identity provider asks
    you to sign in again, even if you are already signed in there, and brings you back. The action
    then works for ten minutes.
+
+Once you've confirmed who you are on a card, other cards on that session confirm without asking
+again for ten minutes.
 
 Wrong answers count against a limit and are throttled. Turning a plugin off or back on, and
 replacing a secret of a plugin that is installed, need the check too. Uploading and setting the

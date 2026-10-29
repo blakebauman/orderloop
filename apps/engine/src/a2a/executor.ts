@@ -33,6 +33,7 @@ import {
   isA2ASkill,
   isAssistantTool,
   isPageOnly,
+  isPanelOnly,
   orderTaskState,
   type Principal,
   ROLE_LABELS,
@@ -323,7 +324,7 @@ export class OrderLoopExecutor implements AgentExecutor {
   private tools(p: Principal): ToolSet {
     // Never a tool only a page's own button runs.
     const names = (Object.keys(ASSISTANT_TOOLS) as AssistantTool[]).filter(
-      (n) => atLeast(p.role, ASSISTANT_TOOLS[n].role) && !isPageOnly(n),
+      (n) => atLeast(p.role, ASSISTANT_TOOLS[n].role) && !isPageOnly(n) && !isPanelOnly(n),
     );
     return Object.fromEntries(
       names.map((name) => {

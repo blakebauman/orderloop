@@ -63,7 +63,8 @@ export async function livePrincipal(
    */
   { touch = true }: { touch?: boolean } = {},
 ): Promise<Principal | null> {
-  const { session, ...principal } = p;
+  // When it last stepped up is read from its session below, never taken from what was forwarded.
+  const { session, steppedUpAt: _stepped, ...principal } = p;
   const db = createDb(env.DB);
   const now = Date.now();
   if (p.kind === 'open') {
@@ -87,7 +88,14 @@ export async function livePrincipal(
   if (!session) return null;
   const seen = sql<number>`coalesce(${sessions.lastSeenAt}, ${sessions.createdAt})`;
   const row = await db
-    .select({ id: users.id, email: users.email, name: users.name, role: users.role, seen })
+    .select({
+      id: users.id,
+      email: users.email,
+      name: users.name,
+      role: users.role,
+      seen,
+      reauthAt: sessions.reauthAt,
+    })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
     .where(
@@ -104,8 +112,13 @@ export async function livePrincipal(
   if (now - row.seen > sessionIdleMs(row.role)) return null;
   if (touch && now - row.seen > SESSION_TOUCH_MS)
     await db.update(sessions).set({ lastSeenAt: now }).where(eq(sessions.tokenHash, session));
-  const { seen: _seen, ...person } = row;
-  return { kind: 'user', ...person, role: row.role };
+  const { seen: _seen, reauthAt, ...person } = row;
+  return {
+    kind: 'user',
+    ...person,
+    role: row.role,
+    ...(reauthAt ? { steppedUpAt: reauthAt } : {}),
+  };
 }
 
 /**

@@ -243,6 +243,17 @@ only the last four characters of its number. Verify previews check approval sepa
 certificate stays on the customer page's form, because it stores the file first and an
 unverified certificate exempts nothing.
 
+Step-up on cards (`apps/engine/src/assistant/admin.ts`):
+- **Which actions need one.** `stepUpNeeded` names the tools the pages asked a step-up for: approving, rolling back, uninstalling or turning on a plugin; a person turning one off; and making someone an admin.
+- **What the card does.** Their previews carry `stepUp: true`. The panel's card then POSTs the person's code or password to `account/step-up` (`routes/account-step-up.ts`), which runs `stepUp()` and, on success, `recordStepUp`. That sets `sessions.reauth_at`, the same column a single sign-on re-login sets.
+- **How the engine checks it.** `livePrincipal` reads `reauth_at` as `Principal.steppedUpAt`, and never takes it from the forwarded header. `runAction` calls `requireSteppedUp` within `STEP_UP_MS`, 10 minutes. A token or OAuth grant has no session, so it can't step up.
+- **Team tools.** `set_member_role` and `set_approval_separation` are in `PANEL_ONLY_TOOLS`. They aren't listed over MCP or A2A, and `runTool` and `runAction` refuse them unless `via` is the assistant. Their previews block a token or a connected app (a principal carrying a `grant`). A demotion's write itself refuses to remove the last admin.
+- **Per-socket sessions.** `AssistantAgent` keeps each socket's principal under `connection:<id>`. `caller()` resolves the calling socket's own session (`getCurrentAgent().connection`), so another session's step-up never applies.
+- **Single sign-on.** `account/step-up` records a step-up only for a code or password. A single-sign-on pass leaves `reauth_at` at the provider sign-in, so the window can't be stretched.
+- **Audit.** A refused plugin change audits `plugin.refused`, and a passed step-up audits `auth.stepped_up`. `mcp.ts` and the A2A agent strip a forwarded `steppedUpAt`.
+- **Not moved.** Disabling or enabling a person stays on the Team page, because it revokes OAuth grants that only the web app can reach.
+- **Web code.** `setRole` and `setApprovalSeparation` left the web app. The REST API's `pluginAction` is unchanged.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.

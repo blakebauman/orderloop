@@ -11,6 +11,7 @@ import {
   ASSISTANT_TOOLS,
   type AssistantTool,
   isPageOnly,
+  isPanelOnly,
   isWriteTool,
   PERSON_CONFIRMS_TOOLS,
 } from './assistant';
@@ -56,7 +57,9 @@ export const A2A_SKILLS: Record<
   },
   ...(Object.fromEntries(
     (Object.keys(ASSISTANT_TOOLS) as AssistantTool[])
-      .filter((name) => !isPageOnly(name) && !PERSON_CONFIRMS_TOOLS.includes(name))
+      .filter(
+        (name) => !isPageOnly(name) && !isPanelOnly(name) && !PERSON_CONFIRMS_TOOLS.includes(name),
+      )
       .map((name) => {
         const t = ASSISTANT_TOOLS[name];
         return [

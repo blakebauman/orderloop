@@ -25,7 +25,7 @@ import {
   type ProxiedPrincipal,
 } from '@orderloop/core';
 import type { Connection, ConnectionContext } from 'agents';
-import { callable } from 'agents';
+import { callable, getCurrentAgent } from 'agents';
 import {
   convertToModelMessages,
   pruneMessages,
@@ -60,7 +60,14 @@ export class AssistantAgent extends AIChatAgent<Env> {
       connection.close(4403, 'Not your assistant');
       return;
     }
-    await this.ctx.storage.put('principal', p);
+    // Kept for this socket, so what it does is held to its own session (its step-up included),
+    // and as the latest, for work no socket started (a reply resumed after a restart).
+    await this.ctx.storage.put({ principal: p, [connectionKey(connection.id)]: p });
+  }
+
+  override async onClose(connection: Connection, code: number, reason: string, wasClean: boolean) {
+    await this.ctx.storage.delete(connectionKey(connection.id));
+    return super.onClose(connection, code, reason, wasClean);
   }
 
   /** No child agents: a `/sub/` path inside this one is refused (agent-routes.ts refuses it first). */
@@ -70,7 +77,12 @@ export class AssistantAgent extends AIChatAgent<Env> {
 
   /** The person this assistant works for, as they are now; throws once their sign-in has ended. */
   private async caller({ touch = true }: { touch?: boolean } = {}): Promise<Principal> {
-    const stored = await this.ctx.storage.get<ProxiedPrincipal>('principal');
+    // The calling socket's own session: another of this person's sessions (another device) never
+    // lends it its step-up, nor keeps it going once it has ended.
+    const connection = getCurrentAgent().connection;
+    const stored = connection
+      ? await this.ctx.storage.get<ProxiedPrincipal>(connectionKey(connection.id))
+      : await this.ctx.storage.get<ProxiedPrincipal>('principal');
     const p = stored ? await livePrincipal(this.env, stored, { touch }) : null;
     if (!p) throw new Refused(SESSION_ENDED);
     return p;
@@ -405,6 +417,8 @@ type Shown = {
 };
 
 const shownKey = (callId: string) => `shown:${callId}`;
+
+const connectionKey = (id: string) => `connection:${id}`;
 
 const SHOWN_CHANGED = 'This changed since the card was first shown. Ask again for a new card.';
 

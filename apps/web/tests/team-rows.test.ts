@@ -1,11 +1,12 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { createRoutesStub, useFetcher } from 'react-router';
+import { createRoutesStub } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('cloudflare:workers', () => ({ env: {} }));
 
 const { RoleForm, RowActions } = await import('../app/routes/team');
+const { AssistantProvider } = await import('../app/lib/assistant');
 
 const render = (Component: () => React.ReactNode) => {
   const Stub = createRoutesStub([{ path: '/team', Component }]);
@@ -14,14 +15,13 @@ const render = (Component: () => React.ReactNode) => {
 
 describe('a person on the Team page', () => {
   it('shows their role with no Save until it is changed', () => {
+    // Saved through the assistant, so it renders inside the shell's provider.
     const html = render(() =>
-      createElement(RoleForm, {
-        id: 'u_ada',
-        name: 'Ada',
-        role: 'operator',
-        stepUp: null,
-        fetcher: useFetcher(),
-      }),
+      createElement(
+        AssistantProvider,
+        null,
+        createElement(RoleForm, { id: 'u_ada', name: 'Ada', role: 'operator' }),
+      ),
     );
     expect(html).toContain('aria-label="Role for Ada"');
     expect(html).not.toContain('Save');

@@ -56,7 +56,7 @@ vi.mock('~/lib/oauth.server', () => ({
 }));
 
 const { endAccess } = await import('~/lib/access.server');
-const { createToken, needsStepUp, resetPassword, setDisabled, setRole, TeamError } = await import(
+const { createToken, needsStepUp, resetPassword, setDisabled, TeamError } = await import(
   '~/lib/team.server'
 );
 const { resetTwoFactor } = await import('~/lib/two-factor.server');
@@ -152,22 +152,6 @@ describe('the Team page ends what no longer fits', () => {
     await setDisabled(request, admin, 'usr_ann', false);
     expect(touched()).toEqual(['update other']);
     expect(revokeGrant).not.toHaveBeenCalled();
-  });
-
-  it('demoting revokes the tokens they made above the new role; promoting revokes none', async () => {
-    rows = [{ id: 'usr_other_admin' }, ann];
-    await setRole(request, admin, 'usr_ann', 'approver');
-    expect(touched()).toEqual(['update other', 'tokens']);
-    expect(audit).toHaveBeenCalledWith(request, 'team.role_changed', {
-      actor: admin,
-      target: ann.email,
-      detail: { from: 'admin', to: 'approver', tokens: 1 },
-    });
-
-    writes = [];
-    rows = [{ id: 'usr_other_admin' }, { ...ann, role: 'viewer' }];
-    await setRole(request, admin, 'usr_ann', 'operator');
-    expect(touched()).toEqual(['update other']);
   });
 
   it('a password reset ends sessions, connected apps and passkeys', async () => {

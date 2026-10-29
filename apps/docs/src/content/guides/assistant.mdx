@@ -128,6 +128,12 @@ sent until you press the confirm button, and declining leaves everything as it w
 These four change what buyers pay or owe in tax, so a person always confirms them: on the panel's
 card, through an MCP confirmation, or with `{ "confirm": true }` in an A2A chat. They aren't typed
 A2A skills. Only a signed-in person verifies a certificate, never an API token.
+| `set_member_role` | `admin` | Changes a person's role. Lowering it revokes their API tokens above the new role; making someone an admin needs a step-up |
+| `set_approval_separation` | `admin` | Sets whether people may approve their own orders and verify certificates they added |
+| `set_plugin_enabled` | `admin` | Turns an installed plugin on or off (a person confirms it's them; an admin token may turn one off) |
+| `approve_plugin` | `admin` | Installs an uploaded or drafted plugin version; needs a step-up |
+| `rollback_plugin` | `admin` | Runs an earlier version of a plugin again; needs a step-up |
+| `uninstall_plugin` | `admin` | Uninstalls a plugin installed at runtime; needs a step-up |
 | `publish_catalog` | `operator` | Publishes up to 500 products' staged edits to the live catalog, each product all or none. The card lists each product and its staged fields, and is held to them |
 | `test_flow` | `operator` | Publishes a flow's saved draft when it changed since the live version, then starts a test order with a demo input; the card says which |
 
@@ -141,6 +147,15 @@ Flows have writes that run without a card, since a draft runs only once publishe
 `archive_flow` (archive or restore a draft that was never published). `save_flow_draft` is the
 editor's **Save**, and only the editor calls it, since it overwrites the draft. The assistant
 proposes changes with `propose_flow_change` instead, which you apply in the editor.
+
+A card that needs a step-up asks you to confirm it's you before it confirms: a code from your
+authenticator app, your password, or signing in again with single sign-on. The engine reads when
+your session last did that from the session itself and allows ten minutes. Each socket holds its own session, so a step-up on one device never confirms a card on another.
+A step-up with single sign-on lasts ten minutes from the sign-in at your provider and isn't
+extended. A connected app or API token has no session, so it can't make those changes. Changing a
+role and the approvals setting are a signed-in person's alone, in the app: they aren't offered
+over MCP or A2A. Running a plugin draft's test cases (`run_plugin_cases`) runs from
+the Plugins page only.
 
 The Catalog page's staging, accepting and dropping (`stage_product_edits`, `accept_product_drafts`,
 `discard_product_edits`) run only from its buttons, since each overwrites or drops what waits to

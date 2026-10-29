@@ -22,6 +22,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@orderloop/ui/card';
+import { Input } from '@orderloop/ui/input';
 import { Item, ItemContent, ItemDescription, ItemTitle } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import {
@@ -428,6 +429,8 @@ export function ActionCard({
   const [p, setP] = useState<ActionPreview | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
+  const [proof, setProof] = useState('');
+  const [stepUpError, setStepUpError] = useState<string | null>(null);
   const titleId = useId();
   const safe = useRef<HTMLButtonElement>(null);
   const asking = part.state === 'approval-requested' && !replaced;
@@ -510,6 +513,7 @@ export function ActionCard({
   const approvalId = part.approval?.id;
   const verb = actionVerb(name, input);
   const blocked = p?.blocked;
+  const needsStepUp = !!p?.stepUp && !blocked;
   // No `overflow-hidden` on the card: it would clip the buttons' touch areas (`hit-area`). Escape
   // leaves the card as it does anywhere else; declining is always a button press.
   return (
@@ -566,6 +570,8 @@ export function ActionCard({
         <CardFooter className="flex-col items-stretch gap-2 rounded-b-2xl border-t bg-muted/40 pb-(--card-spacing)">
           {blocked ? (
             <p className="text-ui text-wait leading-snug">{blocked}</p>
+          ) : needsStepUp ? (
+            <StepUp value={proof} onChange={setProof} error={stepUpError} />
           ) : (
             <p className="text-muted-foreground text-xs leading-snug">
               Nothing is sent until you confirm, here or wherever else you’re signed in.
@@ -589,8 +595,17 @@ export function ActionCard({
                 size="sm"
                 variant={DESTRUCTIVE(name, input) ? 'destructive' : 'default'}
                 disabled={!approvalId || !p || sent}
-                onClick={() => {
+                onClick={async () => {
                   setSent(true);
+                  // A sensitive change proves it's the person first; only then is the card answered.
+                  if (needsStepUp) {
+                    const failed = await proveItsYou(proof);
+                    setStepUpError(failed);
+                    if (failed) {
+                      setSent(false);
+                      return;
+                    }
+                  }
                   respond(approvalId!, true);
                 }}
               >
@@ -795,5 +810,100 @@ export function ProposalCard({ part, streaming }: { part: Part; streaming: boole
         </CardFooter>
       </Card>
     </section>
+  );
+}
+
+type StepUpMethod = 'code' | 'password' | 'sso';
+
+/** Checks the step-up on this session (`/account/step-up`); null when it passed, else why not. */
+async function proveItsYou(proof: string): Promise<string | null> {
+  const method = await stepUpMethodOf();
+  const body =
+    method === 'code' ? { code: proof } : method === 'password' ? { password: proof } : {};
+  try {
+    const res = await fetch('/account/step-up', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const a = (await res.json()) as { ok: boolean; error?: string };
+    return a.ok ? null : (a.error ?? 'That didn’t check out.');
+  } catch {
+    return 'No answer; try again.';
+  }
+}
+
+let method: Promise<StepUpMethod | null> | null = null;
+/** How this person proves it's them, asked once per page load. */
+const stepUpMethodOf = () => {
+  method ??= fetch('/account/step-up')
+    .then((r) => r.json() as Promise<{ method: StepUpMethod | null }>)
+    .then((r) => r.method)
+    .catch(() => {
+      method = null;
+      return null;
+    });
+  return method;
+};
+
+/** What a sensitive change asks before its confirm: a code, the password, or single sign-on. */
+function StepUp({
+  value,
+  onChange,
+  error,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  error: string | null;
+}) {
+  const [m, setM] = useState<StepUpMethod | null | undefined>(undefined);
+  const id = useId();
+  useEffect(() => {
+    let live = true;
+    void stepUpMethodOf().then((x) => live && setM(x));
+    return () => {
+      live = false;
+    };
+  }, []);
+  const next = typeof window === 'undefined' ? '/' : window.location.pathname;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {m === 'sso' ? (
+        <p className="text-muted-foreground text-xs leading-snug">
+          This needs you to confirm it’s you:{' '}
+          <a
+            href={`/login/sso?reauth=1&next=${encodeURIComponent(next)}`}
+            className="text-link hover:underline"
+          >
+            sign in again with single sign-on
+          </a>
+          , then confirm here within ten minutes.
+        </p>
+      ) : m ? (
+        <>
+          <label htmlFor={id} className="text-xs">
+            {m === 'code'
+              ? 'Code from your authenticator app'
+              : 'Your password, to confirm it’s you'}
+          </label>
+          <Input
+            id={id}
+            type={m === 'code' ? 'text' : 'password'}
+            inputMode={m === 'code' ? 'numeric' : undefined}
+            autoComplete={m === 'code' ? 'one-time-code' : 'current-password'}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="max-w-56"
+          />
+        </>
+      ) : (
+        <p className="text-muted-foreground text-xs">Checking how you confirm it’s you…</p>
+      )}
+      {error ? (
+        <p role="alert" className="text-bad text-xs">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

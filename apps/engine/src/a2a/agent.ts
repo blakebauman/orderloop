@@ -152,7 +152,7 @@ export class A2AAgent extends DurableObject<Env> {
       });
     const proxied = await forwardedPrincipal(this.env, request);
     if (!proxied) return new Response('Unauthorized', { status: 401 });
-    const { session: _session, ...principal } = proxied;
+    const { session: _session, steppedUpAt: _stepped, ...principal } = proxied;
     const body = await request.text();
 
     // A 0.3 client is known by its method names (message/send, tasks/get, …); the SDK's 0.3

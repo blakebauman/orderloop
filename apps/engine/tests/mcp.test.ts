@@ -265,7 +265,7 @@ describe('MCP', () => {
       inputSchema: { properties: { cartId: {}, confirmation: {} } },
     });
     const admin = await tools(person('admin', 'ann@example.com'));
-    expect(admin).toHaveLength(33);
+    expect(admin).toHaveLength(37);
     expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       outputSchema: { type: 'object', properties: { id: {}, cases: {}, href: {} } },

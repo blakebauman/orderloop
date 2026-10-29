@@ -37,6 +37,7 @@ import {
   useFetcher,
   useLoaderData,
   useNavigation,
+  useRevalidator,
 } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Confirm } from '~/components/confirm';
@@ -44,6 +45,7 @@ import { CopyButton } from '~/components/copy-button';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { StepUpField } from '~/components/step-up-field';
+import { useAssistant } from '~/lib/assistant';
 import { audit } from '~/lib/audit.server';
 import {
   requireUser,
@@ -62,7 +64,6 @@ import {
 } from '~/lib/scim.server';
 import {
   approvalSeparation,
-  setApprovalSeparation,
   setSsoSettings,
   setTwoFactorRequirement,
   ssoSettings,
@@ -79,7 +80,6 @@ import {
   resetPassword,
   revokeToken,
   setDisabled,
-  setRole,
   TeamError,
 } from '~/lib/team.server';
 import { DEFAULT_LIFETIME, TOKEN_LIFETIMES, type TokenState, tokenState } from '~/lib/tokens';
@@ -176,12 +176,6 @@ export async function action({ request }: Route.ActionArgs) {
           } as Secret,
         };
       }
-      case 'role':
-        await setRole(request, me, str('id'), str('role'));
-        return {
-          ok: true,
-          done: `${str('who')}’s role is now ${isRole(str('role')) ? ROLE_LABELS[str('role') as Role] : str('role')}.`,
-        };
       case 'reset': {
         const r = await resetPassword(request, me, str('id'));
         return {
@@ -216,16 +210,6 @@ export async function action({ request }: Route.ActionArgs) {
           );
         await setSsoSettings(request, me, next);
         return { ok: true, done: 'Single sign-on settings saved.' };
-      }
-      case 'approval-separation': {
-        const on = str('separated') === 'on';
-        await setApprovalSeparation(request, me, on);
-        return {
-          ok: true,
-          done: on
-            ? 'Saved: no one may approve an order they started.'
-            : 'Saved: anyone with the Approver role may approve any order.',
-        };
       }
       case 'reset-two-factor':
         await resetTwoFactor(request, me, str('id'));
@@ -315,42 +299,48 @@ function RoleGuide({ stacked = false }: { stacked?: boolean }) {
 }
 
 /**
- * A person's role, saved from their row; making them an admin asks who you are first. Save shows
- * only once the role is changed, so a row at rest is just its role.
+ * A person's role, saved from their row through the assistant: its card says what changes, and
+ * making them an admin asks who you are there first. Save shows only once the role is changed, so
+ * a row at rest is just its role.
  */
-export function RoleForm({
-  id,
-  name,
-  role,
-  stepUp,
-  fetcher,
-}: {
-  id: string;
-  name: string;
-  role: Role;
-  stepUp: StepUpMethod | null;
-  fetcher: ReturnType<typeof useFetcher>;
-}) {
+export function RoleForm({ id, name, role }: { id: string; name: string; role: Role }) {
   const [chosen, setChosen] = useState<Role>(role);
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act('set_member_role', { userId: id, role: chosen });
+      if (!('declined' in r)) revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <fetcher.Form method="post" className="flex flex-wrap items-center gap-1.5">
-      <input type="hidden" name="intent" value="role" />
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="who" value={name} />
+    <div className="flex flex-wrap items-center gap-1.5">
       <RoleSelect value={role} label={`Role for ${name}`} compact onChange={setChosen} />
       {chosen !== role ? (
         <Button
           size="sm"
           variant="outline"
-          type="submit"
           aria-label={`Save role for ${name}`}
-          disabled={fetcher.state !== 'idle'}
+          disabled={busy}
+          onClick={() => void save()}
         >
-          Save
+          {busy ? 'Confirm it in the assistant' : 'Save'}
         </Button>
       ) : null}
-      {chosen === 'admin' && role !== 'admin' ? <StepUpField method={stepUp} next="/team" /> : null}
-    </fetcher.Form>
+      {error ? (
+        <p role="alert" className="basis-full text-bad text-xs">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -554,8 +544,6 @@ export default function Team() {
                           id={p.id}
                           name={p.name}
                           role={p.role as Role}
-                          stepUp={stepUp}
-                          fetcher={fetcher}
                         />
                         <RowActions
                           id={p.id}
@@ -1227,21 +1215,38 @@ function SsoForm({
 
 /** Separation of duties: whether whoever started an order may also decide its approvals. */
 function ApprovalSeparationForm({ separated }: { separated: boolean }) {
-  const fetcher = useFetcher();
+  const [chosen, setChosen] = useState(separated ? 'on' : 'off');
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Saved through the assistant: its card says who may then approve what.
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act('set_approval_separation', { on: chosen === 'on' });
+      if (!('declined' in r)) revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Section
       title="Approvals"
       description="Whether whoever started an order may also decide its approvals."
     >
-      <fetcher.Form method="post" className="max-w-xl">
-        <input type="hidden" name="intent" value="approval-separation" />
+      <div className="max-w-xl">
         <FieldGroup className="gap-5">
           <Field>
             <FieldLabel htmlFor="separated">Who started an order</FieldLabel>
             <NativeSelect
               id="separated"
               name="separated"
-              defaultValue={separated ? 'on' : 'off'}
+              value={chosen}
+              onChange={(e) => setChosen(e.target.value)}
               className="h-9 w-full"
             >
               <NativeSelectOption value="off">May approve it</NativeSelectOption>
@@ -1253,13 +1258,19 @@ function ApprovalSeparationForm({ separated }: { separated: boolean }) {
               the stock review have no starter, and anyone with the Approver role may decide them.
             </FieldDescription>
           </Field>
+          {error ? <FieldError>{error}</FieldError> : null}
           <div>
-            <Button size="sm" variant="outline" type="submit" disabled={fetcher.state !== 'idle'}>
-              Save
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || chosen === (separated ? 'on' : 'off')}
+              onClick={() => void save()}
+            >
+              {busy ? 'Confirm it in the assistant' : 'Save'}
             </Button>
           </div>
         </FieldGroup>
-      </fetcher.Form>
+      </div>
     </Section>
   );
 }
