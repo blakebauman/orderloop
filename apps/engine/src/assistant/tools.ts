@@ -355,6 +355,7 @@ export const TOOL_INPUTS = {
   }),
   set_member_role: z.object({ userId: z.string().max(60), role: z.enum(ROLES) }),
   set_approval_separation: z.object({ on: z.boolean() }),
+  set_assistant_routing: z.object({ on: z.boolean() }),
   set_plugin_enabled: z.object({ pluginId: z.string().max(60), enabled: z.boolean() }),
   approve_plugin: z.object({
     pluginId: z.string().max(60),
@@ -560,6 +561,7 @@ export const TOOL_OUTPUTS = {
   create_promotion: actionOutput,
   set_member_role: actionOutput,
   set_approval_separation: actionOutput,
+  set_assistant_routing: actionOutput,
   set_plugin_enabled: actionOutput,
   approve_plugin: actionOutput,
   rollback_plugin: actionOutput,
@@ -589,6 +591,7 @@ export const ACTION_TOOLS: ActionTool[] = [
   'revoke_tax_certificate',
   'set_member_role',
   'set_approval_separation',
+  'set_assistant_routing',
   'set_plugin_enabled',
   'approve_plugin',
   'rollback_plugin',

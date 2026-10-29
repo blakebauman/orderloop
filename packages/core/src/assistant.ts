@@ -96,7 +96,8 @@ export type AssistantTool =
   | 'rollback_plugin'
   | 'uninstall_plugin'
   | 'run_plugin_cases'
-  | 'draft_cart_reply';
+  | 'draft_cart_reply'
+  | 'set_assistant_routing';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -469,6 +470,14 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Draft a staff reply to a cart’s chat from its latest messages. Nothing is sent: the draft fills the composer.',
   },
+  set_assistant_routing: {
+    role: 'admin',
+    confirm: true,
+    label: 'Set assistant routing',
+    title: 'Set assistant routing',
+    description:
+      'Choose whether a typed request that is one exact call (cancel this order, list carts) runs without the chat model when the decision model is sure, to save model cost.',
+  },
 };
 
 /**
@@ -528,6 +537,7 @@ export const PERSON_CONFIRMS_TOOLS: readonly AssistantTool[] = [
   // Who may do what: only a person on the Team page decides it.
   'set_member_role',
   'set_approval_separation',
+  'set_assistant_routing',
 ];
 
 /**
@@ -538,6 +548,7 @@ export const PERSON_CONFIRMS_TOOLS: readonly AssistantTool[] = [
 export const PANEL_ONLY_TOOLS: readonly AssistantTool[] = [
   'set_member_role',
   'set_approval_separation',
+  'set_assistant_routing',
 ];
 
 export const isPanelOnly = (name: AssistantTool) => PANEL_ONLY_TOOLS.includes(name);

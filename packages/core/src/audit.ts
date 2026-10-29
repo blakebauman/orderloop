@@ -49,6 +49,8 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'plugin.draft_refused': 'The assistant’s plugin draft was refused',
   // Admin changes the assistant makes for a person on the Team and Plugins pages.
   'team.role_changed': 'Changed a role',
+  'team.assistant_routing':
+    'Changed whether the assistant routes exact requests without the chat model',
   'team.approval_separation': 'Changed whether people may approve orders they started',
   'plugin.approved': 'Installed a plugin',
   'plugin.disabled': 'Turned off a plugin',

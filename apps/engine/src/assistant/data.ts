@@ -57,10 +57,12 @@ import {
   previewApprovalSeparation,
   previewMemberRole,
   previewPlugin,
+  previewRouting,
   requireSteppedUp,
   runApprovalSeparation,
   runMemberRole,
   runPlugin,
+  runRouting,
   stepUpNeeded,
 } from './admin';
 import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
@@ -525,6 +527,7 @@ export type ActionInput = {
   create_promotion: PromotionInput;
   set_member_role: { userId: string; role: Role };
   set_approval_separation: { on: boolean };
+  set_assistant_routing: { on: boolean };
   set_plugin_enabled: { pluginId: string; enabled: boolean };
   approve_plugin: { pluginId: string; sha: string; personalData?: boolean };
   rollback_plugin: { pluginId: string; sha: string };
@@ -682,6 +685,12 @@ export async function previewAction<T extends ActionTool>(
         return await previewApprovalSeparation(
           env,
           (input as ActionInput['set_approval_separation']).on,
+          roleBlock ?? personOnly(p),
+        );
+      case 'set_assistant_routing':
+        return await previewRouting(
+          env,
+          (input as ActionInput['set_assistant_routing']).on,
           roleBlock ?? personOnly(p),
         );
       case 'set_plugin_enabled':
@@ -918,6 +927,8 @@ export async function runAction<T extends ActionTool>(
         (input as ActionInput['set_approval_separation']).on,
         trail,
       );
+    case 'set_assistant_routing':
+      return runRouting(env, p, (input as ActionInput['set_assistant_routing']).on, trail);
     case 'set_plugin_enabled':
     case 'approve_plugin':
     case 'rollback_plugin':
