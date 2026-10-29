@@ -63,7 +63,9 @@ people, revoking tokens and the approvals setting don't ask: they take access aw
 hand it out. A wrong answer is refused,
 counted against the same limit as other step-ups and audited as `auth.step_up_failed`. A step-up
 on an assistant card counts for ten minutes on that session: other cards in that time confirm
-without asking again. Changing a role and the approvals setting go through the assistant's cards,
+without asking again. Changing a role, the approvals setting and the assistant setting (whether
+[exact requests](/guides/assistant/#exact-requests-without-the-chat-model) run without the chat
+model) go through the assistant's cards,
 and only a signed-in admin can make them, never an API token.
 
 - **Add person** (beside **People**): email, optional name and role. The page shows a generated 20-character

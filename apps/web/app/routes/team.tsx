@@ -64,6 +64,7 @@ import {
 } from '~/lib/scim.server';
 import {
   approvalSeparation,
+  assistantRouting,
   setSsoSettings,
   setTwoFactorRequirement,
   ssoSettings,
@@ -99,14 +100,16 @@ export async function loader({ request }: Route.LoaderArgs) {
   const me = await requireUser(request, 'admin');
   const stepUp = await stepUpMethod(me);
   // One clock for the page, so the server and the hydrating browser agree on each token's state.
-  const [team, twoFactorRequired, separated, sso, scimToken, scimGroups] = await Promise.all([
-    listTeam(),
-    twoFactorRequirement(),
-    approvalSeparation(),
-    ssoSettings(),
-    scimTokenSet(),
-    scimGroupsWithRoles(),
-  ]);
+  const [team, twoFactorRequired, separated, routing, sso, scimToken, scimGroups] =
+    await Promise.all([
+      listTeam(),
+      twoFactorRequirement(),
+      approvalSeparation(),
+      assistantRouting(),
+      ssoSettings(),
+      scimTokenSet(),
+      scimGroupsWithRoles(),
+    ]);
   const provider = ssoConfig();
   // The address a new person signs in at, to send along with their temporary password.
   const signInUrl = new URL('/login', request.url).href;
@@ -114,6 +117,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ...team,
     twoFactorRequired,
     separated,
+    routing,
     sso: provider
       ? { issuer: provider.issuer, settings: sso, linked: await linkedToSso(me.id) }
       : null,
@@ -380,8 +384,19 @@ function RoleSelect({
 }
 
 export default function Team() {
-  const { people, tokens, me, now, twoFactorRequired, separated, sso, scim, signInUrl, stepUp } =
-    useLoaderData<typeof loader>();
+  const {
+    people,
+    tokens,
+    me,
+    now,
+    twoFactorRequired,
+    separated,
+    routing,
+    sso,
+    scim,
+    signInUrl,
+    stepUp,
+  } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const fetcher = useFetcher<typeof action>();
   const shown = fetcher.data ?? result;
@@ -689,6 +704,7 @@ export default function Team() {
           <ScimSection {...scim} stepUp={stepUp} fetcher={fetcher} now={now} />
 
           <ApprovalSeparationForm separated={separated} />
+          <AssistantRoutingForm routing={routing} />
         </div>
 
         <aside aria-label="Roles" className="min-w-0">
@@ -1264,6 +1280,71 @@ function ApprovalSeparationForm({ separated }: { separated: boolean }) {
               size="sm"
               variant="outline"
               disabled={busy || chosen === (separated ? 'on' : 'off')}
+              onClick={() => void save()}
+            >
+              {busy ? 'Confirm it in the assistant' : 'Save'}
+            </Button>
+          </div>
+        </FieldGroup>
+      </div>
+    </Section>
+  );
+}
+
+/** Whether the assistant runs exact requests without the chat model, to save model cost. */
+function AssistantRoutingForm({ routing }: { routing: boolean }) {
+  const [chosen, setChosen] = useState(routing ? 'on' : 'off');
+  const { act } = useAssistant();
+  const { revalidate } = useRevalidator();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Saved through the assistant: its card says what changes.
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await act('set_assistant_routing', { on: chosen === 'on' });
+      if (!('declined' in r)) revalidate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Section
+      title="Assistant"
+      description="Whether a request that is one exact call skips the chat model."
+    >
+      <div className="max-w-xl">
+        <FieldGroup className="gap-5">
+          <Field>
+            <FieldLabel htmlFor="routing">Exact requests</FieldLabel>
+            <NativeSelect
+              id="routing"
+              value={chosen}
+              onChange={(e) => setChosen(e.target.value)}
+              className="h-9 w-full"
+            >
+              <NativeSelectOption value="off">Always use the chat model</NativeSelectOption>
+              <NativeSelectOption value="on">
+                Run on fixed rules when the decision model is sure
+              </NativeSelectOption>
+            </NativeSelect>
+            <FieldDescription className="text-xs">
+              Saves model cost. A request such as “cancel this order” or “list open carts” is read
+              by fixed rules; the decision model checks that the request asks for exactly that, and
+              only then does it run without the chat model. Anything else goes to the chat model as
+              before, and actions still stop at their confirm card. Page buttons never use a model
+              either way.
+            </FieldDescription>
+          </Field>
+          {error ? <FieldError>{error}</FieldError> : null}
+          <div>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy || chosen === (routing ? 'on' : 'off')}
               onClick={() => void save()}
             >
               {busy ? 'Confirm it in the assistant' : 'Save'}

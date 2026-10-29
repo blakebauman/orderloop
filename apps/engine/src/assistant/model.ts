@@ -375,14 +375,14 @@ export function describeResult(tool: string, output: unknown): string {
       const c = (o.counts ?? {}) as { approvals?: number; failed?: number; stalled?: number };
       const lines: string[] = [];
       for (const a of list<{ orderId: string; title: string }>(o.approvals))
-        lines.push(`- ${a.title} on [${orderRef(a.orderId)}](/orders/${a.orderId})`);
+        lines.push(`- ${plain(a.title)} on [${orderRef(a.orderId)}](/orders/${a.orderId})`);
       for (const f of list<{ id: string; title: string; status: string }>(o.failed))
         lines.push(
-          `- [${orderRef(f.id)}](/orders/${f.id}) ${f.title ? `${f.title} ` : ''}${f.status.replace('_', ' ')}`,
+          `- [${orderRef(f.id)}](/orders/${f.id}) ${f.title ? `${plain(f.title)} ` : ''}${f.status.replace('_', ' ')}`,
         );
       for (const s of list<{ id: string; waitingOn: string | null }>(o.stalled))
         lines.push(
-          `- [${orderRef(s.id)}](/orders/${s.id}) waiting on ${s.waitingOn ?? 'an event'} for over a day`,
+          `- [${orderRef(s.id)}](/orders/${s.id}) waiting on ${s.waitingOn ? plain(s.waitingOn) : 'an event'} for over a day`,
         );
       if (!lines.length)
         return 'Nothing is waiting on anyone. No open approvals, recent failures or stalled orders.';
@@ -409,7 +409,7 @@ export function describeResult(tool: string, output: unknown): string {
         '',
         ...rows.map(
           (r) =>
-            `- [${r.ref}](${r.href}) ${r.title || r.customer || ''} · ${where(r.status, r.waitingAt, r.stoppedAt)} · ${r.total}`,
+            `- [${r.ref}](${r.href}) ${plain(r.title || r.customer || '')} · ${where(r.status, r.waitingAt, r.stoppedAt)} · ${r.total}`,
         ),
       ].join('\n');
     }
@@ -419,12 +419,12 @@ export function describeResult(tool: string, output: unknown): string {
         (x) => x.status === 'failed',
       );
       return [
-        `[${o.ref}](${o.href}) ${o.title} is **${String(o.status).replaceAll('_', ' ')}**${failed && !waits.length ? ` at ${failed.step}` : ''}${o.reason ? `: ${o.reason}` : ''}. ${o.total}${o.customer ? ` for ${o.customer}` : ''}.`,
+        `[${o.ref}](${o.href}) ${plain(o.title)} is **${String(o.status).replaceAll('_', ' ')}**${failed && !waits.length ? ` at ${plain(failed.step)}` : ''}${o.reason ? `: ${plain(o.reason)}` : ''}. ${o.total}${o.customer ? ` for ${plain(o.customer)}` : ''}.`,
         waits.length
           ? `It waits at ${waits
               .map(
                 (w) =>
-                  `${w.step ?? w.title} for ${w.kind === 'approval' ? 'an approval' : `the event ${w.event}`}`,
+                  `${plain(w.step ?? w.title)} for ${w.kind === 'approval' ? 'an approval' : `the event ${plain(w.event)}`}`,
               )
               .join(' and ')}.`
           : '',
@@ -446,7 +446,10 @@ export function describeResult(tool: string, output: unknown): string {
       if (!rows.length) return 'No products match.';
       return rows
         .slice(0, 12)
-        .map((p) => `- ${p.sku} ${p.name}: ${p.available} available (reorder at ${p.reorderPoint})`)
+        .map(
+          (p) =>
+            `- ${plain(p.sku)} ${plain(p.name)}: ${p.available} available (reorder at ${p.reorderPoint})`,
+        )
         .join('\n');
     }
     case 'list_carts': {
@@ -465,13 +468,13 @@ export function describeResult(tool: string, output: unknown): string {
       return list<{ name: string; href: string; publishedVersion: number | null }>(o.flows)
         .map(
           (f) =>
-            `- [${f.name}](${f.href}) ${f.publishedVersion ? `v${f.publishedVersion}` : 'not published'}`,
+            `- [${plain(f.name)}](${f.href}) ${f.publishedVersion ? `v${f.publishedVersion}` : 'not published'}`,
         )
         .join('\n');
     case 'get_flow':
-      return `[${o.name}](${o.href}) has ${list(o.steps).length} steps${o.publishedVersion ? `; v${o.publishedVersion} is live` : ''}.${list(o.errors).length ? ` ${list(o.errors).length} problem(s) to fix.` : ''}`;
+      return `[${plain(o.name)}](${o.href}) has ${list(o.steps).length} steps${o.publishedVersion ? `; v${o.publishedVersion} is live` : ''}.${list(o.errors).length ? ` ${list(o.errors).length} problem(s) to fix.` : ''}`;
     case 'propose_flow_change':
-      return `${o.explanation} Review it in the editor before applying.`;
+      return `${plain(o.explanation)} Review it in the editor before applying.`;
     case 'draft_plugin': {
       const cases = (o.cases ?? {}) as { total?: number; passed?: number };
       return `Drafted [${plain(o.name)} version ${plain(o.version)}](${o.href}): ${plain(o.explanation)} ${cases.passed ?? 0} of ${cases.total ?? 0} test cases pass. Nothing runs until an admin reviews and approves it on the Plugins page.`;

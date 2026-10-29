@@ -264,6 +264,13 @@ inline chat. `draft_cart_reply` (`apps/engine/src/assistant/cart-reply.ts`) is p
 - it removes any URL the thread doesn't already contain;
 - it returns the draft to the page, while the conversation keeps only `done`.
 
+Decision-model routing (`apps/engine/src/assistant/routing.ts`):
+- **Setting.** It is the `assistant_routing` workspace setting (`ASSISTANT_ROUTING_KEY`), off by default. It's set with `set_assistant_routing`, a panel-only admin card in `PERSON_CONFIRMS_TOOLS`, and audited as `team.assistant_routing`.
+- **Routing a question.** For a new user message, `onChatMessage` calls `routeQuestion`. `heuristicStep` builds one call from the person's role-allowed tools; with none, the turn goes to the chat model. Otherwise Clef (`assess`, `ASSESS_MODEL`) answers one noul question over the bounded text, the page and the proposed call.
+- **What it routes to.** Reads, and actions that stop at their card. Never a write that runs without one (`draft_plugin`, `draft_product_content`), nor `propose_flow_change`. The rules' answers (`describeResult`) pass order, customer and flow text through `plain`, so a title can't become a link.
+- **The threshold.** At or above `ROUTING_THRESHOLD` (0.85), the turn streams from `heuristicModel(context)` with the same tools, and its metadata source is `decision`. Below it, or when Clef is unavailable, the turn runs as before.
+- **Logging and budget.** Clef's tokens count against the assistant budget. `assistant_route` logs the route and reason, never the text.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.

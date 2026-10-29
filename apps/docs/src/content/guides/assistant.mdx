@@ -196,6 +196,19 @@ submit is refused and nothing is ordered, and the same card opened again (in ano
 says so instead of offering a confirm; ask again for a new card. The audit trail names the actor as `<email> via assistant`: that string is the approval's
 `by`, or ends the cancel reason. A confirmed action is also an [audit log](/guides/team-and-roles/#audit-log) event (`via` the assistant, with the `tool`); read-only tools are not logged.
 
+## Exact requests without the chat model
+
+An admin can choose, under **Assistant** on the Team page, to run exact requests without the chat
+model. That saves model cost, since buttons on the pages never use a model and the cost is in
+typed questions. With it on, a new question first goes to fixed rules, which read it as one exact
+call using the page you're on, such as "cancel this order" or "list open carts". The decision model
+(the one [Assess](/guides/ai/#assess) uses) is then asked whether your request asks for exactly
+that and nothing more. Only when it is sure does the turn run on the fixed rules, without the chat
+model. The answer then says it was "an exact request". Anything else goes to the chat model as
+before: a question that needs an explanation, one the rules can't read, or one the decision model
+isn't sure of. Actions still stop at their confirm card. The setting is off until an admin turns
+it on, and changing it is a confirm card in the app.
+
 ## Roles
 
 The assistant works within your role (`viewer`, `approver`, `operator`, `admin`, in order; only `draft_plugin` needs `admin`). A tool your role can't use is

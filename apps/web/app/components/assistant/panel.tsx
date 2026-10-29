@@ -285,7 +285,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
   );
 }
 
-type Meta = { source?: 'model' | 'heuristic' | 'direct' };
+type Meta = { source?: 'model' | 'heuristic' | 'direct' | 'decision' };
 type Message = UIMessage<Meta>;
 
 function Conversation() {
@@ -833,6 +833,11 @@ function AssistantMessage({
           <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
             <Info className="size-3" aria-hidden="true" />
             Answered without the language model, from fixed rules.
+          </p>
+        ) : m.metadata?.source === 'decision' && !streaming ? (
+          <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <Info className="size-3" aria-hidden="true" />
+            An exact request: answered from fixed rules, without the chat model.
           </p>
         ) : null}
       </MessageContent>

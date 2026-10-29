@@ -460,6 +460,13 @@ export async function verifyHealthCheck(
  */
 export const APPROVAL_SEPARATION_KEY = 'approval_separation';
 
+/**
+ * The workspace's assistant routing (`on` or `off`, off unless an admin turns it on): whether a
+ * typed request the fixed rules read as one exact call runs without the chat model, when Clef is
+ * sure they read it right (`apps/engine/src/assistant/routing.ts`).
+ */
+export const ASSISTANT_ROUTING_KEY = 'assistant_routing';
+
 export const OWN_ORDER_REFUSAL =
   'You started this order, so someone else must decide its approvals.';
 

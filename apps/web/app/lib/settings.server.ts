@@ -4,7 +4,7 @@
  */
 
 import { env } from 'cloudflare:workers';
-import { APPROVAL_SEPARATION_KEY, type Principal } from '@orderloop/core';
+import { APPROVAL_SEPARATION_KEY, ASSISTANT_ROUTING_KEY, type Principal } from '@orderloop/core';
 import { workspaceSettings } from '@orderloop/db';
 import { eq } from 'drizzle-orm';
 import { audit } from './audit.server';
@@ -54,6 +54,20 @@ export async function setTwoFactorRequirement(
     });
   cached = { value: next, at: Date.now() };
   await audit(request, 'team.two_factor_requirement', { actor: by, detail: { from, to: next } });
+}
+
+/**
+ * Whether the assistant routes a typed request that is one exact call without the chat model,
+ * when Clef is sure (`routing.ts` in the engine, which reads the same row); off until an admin
+ * turns it on. Read fresh: the Team page shows what a change just set.
+ */
+export async function assistantRouting(): Promise<boolean> {
+  const row = await db()
+    .select({ value: workspaceSettings.value })
+    .from(workspaceSettings)
+    .where(eq(workspaceSettings.key, ASSISTANT_ROUTING_KEY))
+    .get();
+  return row?.value === 'on';
 }
 
 let separation: { value: boolean; at: number } | null = null;

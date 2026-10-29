@@ -47,7 +47,8 @@ import {
   Refused,
   requireRole,
 } from './data';
-import { assistantModel, type ModelSource } from './model';
+import { assistantModel, heuristicModel, type ModelSource } from './model';
+import { routeQuestion } from './routing';
 import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
 
 export class AssistantAgent extends AIChatAgent<Env> {
@@ -348,20 +349,40 @@ export class AssistantAgent extends AIChatAgent<Env> {
     const context = readContext(options?.body?.context);
     const used: ModelSource = { source: 'model' };
     const started = Date.now();
+    const tools = this.tools(p, context);
+    // A new question the fixed rules read as one exact call, and Clef is sure of, runs without
+    // the chat model (routing.ts). A turn going on after a card or a tool isn't routed.
+    const asked = this.messages.at(-1);
+    const route =
+      asked?.role === 'user'
+        ? await routeQuestion(this.env, p, textOf(asked), context, new Set(Object.keys(tools)))
+        : null;
+    const routed = route?.route === 'rules';
+    if (routed) used.source = 'heuristic';
+    if (route)
+      console.log(
+        JSON.stringify({
+          type: 'assistant_route',
+          route: route.route,
+          ...('reason' in route ? { reason: route.reason } : { tool: route.tool, yes: route.yes }),
+        }),
+      );
     const result = streamText({
       // One conversation per person: the agent is named for them.
-      model: await assistantModel(this.env, context, used, {
-        surface: 'panel',
-        principalId: p.id,
-        conversation: this.name,
-      }),
+      model: routed
+        ? heuristicModel(context)
+        : await assistantModel(this.env, context, used, {
+            surface: 'panel',
+            principalId: p.id,
+            conversation: this.name,
+          }),
       system: systemPrompt(p, context),
       messages: pruneMessages({
         messages: await convertToModelMessages(answeredOnly(this.messages)),
         reasoning: 'before-last-message',
         toolCalls: 'before-last-2-messages',
       }),
-      tools: this.tools(p, context),
+      tools,
       stopWhen: stepCountIs(6),
       temperature: 0.2,
       abortSignal: options?.abortSignal,
@@ -372,7 +393,9 @@ export class AssistantAgent extends AIChatAgent<Env> {
     });
     return result.toUIMessageStreamResponse({
       messageMetadata: ({ part }) =>
-        part.type === 'finish' ? { source: used.source, at: Date.now() } : undefined,
+        part.type === 'finish'
+          ? { source: routed ? 'decision' : used.source, at: Date.now() }
+          : undefined,
     });
   }
 
@@ -427,6 +450,14 @@ export const DIRECT = DIRECT_CALL;
 const ALREADY_ANSWERED = 'This was already answered.';
 
 /** What a stored call says went wrong: a refusal's own words, never an internal error's. */
+/** A message's text, as the person wrote it. */
+/** A message's text as the fixed rules read it (`lastUserText`), so Clef judges the call they build. */
+const textOf = (m: UIMessage) =>
+  m.parts
+    .flatMap((x) => (x.type === 'text' ? [x.text] : []))
+    .join(' ')
+    .trim();
+
 const errorLine = (err: unknown) =>
   err instanceof Refused ? err.message : 'That didn’t go through. Try again in a moment.';
 
@@ -476,9 +507,9 @@ export function answeredOnly(messages: UIMessage[]): UIMessage[] {
 /** The page the person is on, as the panel sent it; anything malformed counts as the workspace. */
 export function readContext(raw: unknown): AssistantContext {
   const c = (raw ?? {}) as Record<string, unknown>;
-  if (c.kind === 'order' && typeof c.id === 'string')
+  if (c.kind === 'order' && typeof c.id === 'string' && /^[\w#-]{1,80}$/.test(c.id))
     return { kind: 'order', id: c.id, label: String(c.label ?? c.id).slice(0, 120) };
-  if (c.kind === 'flow' && typeof c.id === 'string') {
+  if (c.kind === 'flow' && typeof c.id === 'string' && /^[\w-]{1,80}$/.test(c.id)) {
     const graph = flowGraphSchema.safeParse(c.graph);
     return {
       kind: 'flow',

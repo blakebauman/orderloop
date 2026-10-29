@@ -12,6 +12,7 @@
 import {
   type ActionPreview,
   APPROVAL_SEPARATION_KEY,
+  ASSISTANT_ROUTING_KEY,
   boundText,
   type PluginCase,
   type Principal,
@@ -26,6 +27,7 @@ import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { recordAudit } from '../audit';
 import * as installs from '../plugin-installs';
 import { Refused } from './data';
+import { routingOn } from './routing';
 
 type Trail = Record<string, unknown>;
 
@@ -213,6 +215,50 @@ export async function runApprovalSeparation(env: Env, p: Principal, on: boolean,
   });
   return {
     done: on ? 'People can’t approve their own orders' : 'Approvers may approve any order',
+    href: '/team',
+  };
+}
+
+export async function previewRouting(
+  env: Env,
+  on: boolean,
+  roleBlock?: string,
+): Promise<ActionPreview> {
+  return {
+    title: on
+      ? 'Route exact requests without the chat model'
+      : 'Send every request to the chat model',
+    href: '/team',
+    consequences: on
+      ? [
+          'A request that is one exact call (“cancel this order”, “list open carts”) runs on fixed rules when the decision model is sure, so no chat model is paid for',
+          'Anything else, and anything it isn’t sure of, goes to the chat model as before',
+          'Actions still stop at their confirm card',
+        ]
+      : ['Every typed request goes to the chat model'],
+    blocked:
+      roleBlock ?? ((await routingOn(env)) === on ? 'It is already set that way.' : undefined),
+  };
+}
+
+export async function runRouting(env: Env, p: Principal, on: boolean, trail: Trail) {
+  const value = on ? 'on' : 'off';
+  const updatedBy = p.email ?? p.name;
+  await createDb(env.DB)
+    .insert(workspaceSettings)
+    .values({ key: ASSISTANT_ROUTING_KEY, value, updatedAt: Date.now(), updatedBy })
+    .onConflictDoUpdate({
+      target: workspaceSettings.key,
+      set: { value, updatedAt: Date.now(), updatedBy },
+    });
+  await recordAudit(env, 'team.assistant_routing', {
+    actor: p,
+    detail: { from: on ? 'off' : 'on', to: value, ...trail },
+  });
+  return {
+    done: on
+      ? 'Exact requests now run without the chat model'
+      : 'Every request goes to the chat model',
     href: '/team',
   };
 }
