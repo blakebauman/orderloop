@@ -103,7 +103,9 @@ unknown. On 2026-07-28 the tool list may be cached by the client for a minute.
 
 An action (`decide_approval`, `decide_approvals`, `deliver_event`, `cancel_order`, `submit_cart`,
 `publish_flow`, `publish_catalog`, `create_promotion`, `set_promotion_status`,
-`verify_tax_certificate`, `revoke_tax_certificate`, `run_stock_review`, `start_order`, `restart_order`, `cancel_cart` and `test_flow`) never runs on the first call, whatever the client does. How the person
+`verify_tax_certificate`, `revoke_tax_certificate`, the admin tools (`set_member_role`,
+`set_approval_separation`, `set_plugin_enabled`, `approve_plugin`, `rollback_plugin`,
+`uninstall_plugin`), `run_stock_review`, `start_order`, `restart_order`, `cancel_cart` and `test_flow`) never runs on the first call, whatever the client does. Those that need a step-up (approving, rolling back, uninstalling or turning on a plugin, and making someone an admin) are refused over MCP, which has no session to step up; an admin API token may still turn a plugin off. How the person
 agrees depends on the client.
 
 ### Clients that ask their person
@@ -161,8 +163,8 @@ Annotations also tell a client when to confirm:
 |---|---|
 | Reads and `propose_flow_change` | `readOnlyHint: true` |
 | `draft_plugin`, `draft_product_content`, `create_cart`, `change_cart`, `create_flow`, `duplicate_flow`, `archive_flow` | save a draft (nothing runs until an admin approves the plugin, someone publishes the product's drafts or submits the cart): not read-only, not destructive, not idempotent |
-| `decide_approval`, `decide_approvals`, `cancel_order`, `submit_cart`, `publish_flow`, `publish_catalog` | `destructiveHint: true`; all but `publish_flow` are also `idempotentHint: true` |
-| `deliver_event`, `run_stock_review`, `start_order`, `restart_order`, `cancel_cart`, `test_flow`, `create_promotion`, `set_promotion_status`, `verify_tax_certificate`, `revoke_tax_certificate` | writes, not destructive |
+| `decide_approval`, `decide_approvals`, `cancel_order`, `submit_cart`, `publish_flow`, `publish_catalog`, `uninstall_plugin` | `destructiveHint: true`; all but `publish_flow` are also `idempotentHint: true` |
+| `deliver_event`, `run_stock_review`, `start_order`, `restart_order`, `cancel_cart`, `test_flow`, `create_promotion`, `set_promotion_status`, `verify_tax_certificate`, `revoke_tax_certificate`, `set_member_role`, `set_approval_separation`, `set_plugin_enabled`, `approve_plugin`, `rollback_plugin` | writes, not destructive |
 
 `cancel_order`, `submit_cart`, `run_stock_review`, `start_order`, `restart_order`, `test_flow` and
 `assess_order` set `openWorldHint: true` (a started order runs its flow for real):

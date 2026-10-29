@@ -21,6 +21,7 @@ import {
   type FlowProposal,
   flowGraphSchema,
   graphDiff,
+  isPanelOnly,
   ORDER_MODEL_LABELS,
   ORDER_MODELS,
   type OrderChannel,
@@ -28,6 +29,7 @@ import {
   type OrderState,
   type Principal,
   ROLE_LABELS,
+  type Role,
   TERMINAL_ORDER_STATUSES,
   validateGraph,
 } from '@orderloop/core';
@@ -50,6 +52,17 @@ import { assess, resolveImages } from '../clef';
 import { orderAgent } from '../namespaces';
 import { registry } from '../plugins';
 import { separationRefusal } from '../separation';
+import {
+  type PluginChange,
+  previewApprovalSeparation,
+  previewMemberRole,
+  previewPlugin,
+  requireSteppedUp,
+  runApprovalSeparation,
+  runMemberRole,
+  runPlugin,
+  stepUpNeeded,
+} from './admin';
 import { previewCancelCart, previewSubmit, runCancelCart, runSubmit } from './carts';
 import { previewPublishCatalog, runPublishCatalog } from './catalog';
 import {
@@ -473,6 +486,12 @@ const boundPayload = (p: EventPayload) =>
     Object.entries(p).map(([k, v]) => [k, typeof v === 'string' ? boundText(v, 120) : v]),
   );
 
+/** Who may do what on the team is a person's call, signed in as themselves, never a token's. */
+const personOnly = (p: Principal) =>
+  p.kind === 'user' && !('grant' in p)
+    ? undefined
+    : 'A person changes the team, signed in as themselves.';
+
 /** A batch's approvals, each once. */
 const batchOf = (i: ActionInput['decide_approvals']) => [
   ...new Map(i.approvals.map((a) => [`${a.orderId} ${a.nodeId}`, a])).values(),
@@ -504,6 +523,12 @@ export type ActionInput = {
   test_flow: { flowId: string };
   publish_catalog: { keys: string[] };
   create_promotion: PromotionInput;
+  set_member_role: { userId: string; role: Role };
+  set_approval_separation: { on: boolean };
+  set_plugin_enabled: { pluginId: string; enabled: boolean };
+  approve_plugin: { pluginId: string; sha: string; personalData?: boolean };
+  rollback_plugin: { pluginId: string; sha: string };
+  uninstall_plugin: { pluginId: string };
   set_promotion_status: { promotionId: string; status: 'active' | 'paused' };
   verify_tax_certificate: { customerId: string; certificateId: string };
   revoke_tax_certificate: { customerId: string; certificateId: string };
@@ -646,6 +671,29 @@ export async function previewAction<T extends ActionTool>(
       }
       case 'submit_cart':
         return await previewSubmit(env, p, input as ActionInput['submit_cart']);
+      case 'set_member_role':
+        return await previewMemberRole(
+          env,
+          p,
+          input as ActionInput['set_member_role'],
+          roleBlock ?? personOnly(p),
+        );
+      case 'set_approval_separation':
+        return await previewApprovalSeparation(
+          env,
+          (input as ActionInput['set_approval_separation']).on,
+          roleBlock ?? personOnly(p),
+        );
+      case 'set_plugin_enabled':
+      case 'approve_plugin':
+      case 'rollback_plugin':
+      case 'uninstall_plugin':
+        return await previewPlugin(
+          env,
+          p,
+          { tool, ...(input as object) } as PluginChange,
+          roleBlock,
+        );
       case 'create_promotion':
         return await previewCreatePromotion(
           env,
@@ -759,8 +807,13 @@ export async function runAction<T extends ActionTool>(
   key?: string,
 ): Promise<Record<string, unknown>> {
   requireRole(p, tool);
+  // Who may do what on the team is changed only in the app, never over MCP or A2A.
+  if (isPanelOnly(tool) && channel !== 'assistant')
+    throw new Refused('This is changed only in the app, by a person signed in.');
   const preview = await previewAction(env, p, tool, input);
   if (preview.blocked) throw new Refused(preview.blocked);
+  // What its page asks a step-up for needs one on this session, read from the session itself.
+  if (await stepUpNeeded(env, p, tool, input as Record<string, unknown>)) requireSteppedUp(p);
   const by = via(p, channel);
   // A connected app's grant and client, so the audit trail tells two apps one person connected apart.
   const app = p as { grant?: string; client?: string };
@@ -856,6 +909,20 @@ export async function runAction<T extends ActionTool>(
       return runSubmit(env, p, input as ActionInput['submit_cart'], channel, confirmed);
     case 'cancel_cart':
       return runCancelCart(env, p, (input as ActionInput['cancel_cart']).cartId, trail);
+    case 'set_member_role':
+      return runMemberRole(env, p, input as ActionInput['set_member_role'], trail);
+    case 'set_approval_separation':
+      return runApprovalSeparation(
+        env,
+        p,
+        (input as ActionInput['set_approval_separation']).on,
+        trail,
+      );
+    case 'set_plugin_enabled':
+    case 'approve_plugin':
+    case 'rollback_plugin':
+    case 'uninstall_plugin':
+      return runPlugin(env, p, { tool, ...(input as object) } as PluginChange, trail);
     case 'create_promotion':
       return runCreatePromotion(env, p, input as ActionInput['create_promotion'], trail);
     case 'set_promotion_status':

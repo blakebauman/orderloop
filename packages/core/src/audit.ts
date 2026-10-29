@@ -47,6 +47,16 @@ export const BUSINESS_AUDIT_ACTIONS = {
   'catalog.gaps_rebuilt': "Rebuilt the catalog's gap index",
   'plugin.drafted': 'The assistant drafted a plugin',
   'plugin.draft_refused': 'The assistant’s plugin draft was refused',
+  // Admin changes the assistant makes for a person on the Team and Plugins pages.
+  'team.role_changed': 'Changed a role',
+  'team.approval_separation': 'Changed whether people may approve orders they started',
+  'plugin.approved': 'Installed a plugin',
+  'plugin.disabled': 'Turned off a plugin',
+  'plugin.enabled': 'Turned on a plugin',
+  'plugin.rolled_back': 'Rolled back a plugin',
+  'plugin.uninstalled': 'Uninstalled a plugin',
+  'plugin.cases_run': 'Ran a drafted plugin’s test cases',
+  'plugin.refused': 'Plugin change refused',
 } as const;
 
 export type BusinessAuditAction = keyof typeof BUSINESS_AUDIT_ACTIONS;

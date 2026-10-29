@@ -14,6 +14,7 @@ import {
   ASSISTANT_TOOLS,
   type AssistantTool,
   isPageOnly,
+  isPanelOnly,
   PERSON_CONFIRMS_TOOLS,
 } from '../src/assistant';
 import { ORDER_STATUSES, TERMINAL_ORDER_STATUSES } from '../src/types';
@@ -53,6 +54,7 @@ describe('A2A', () => {
     for (const [name, t] of Object.entries(ASSISTANT_TOOLS))
       if (
         isPageOnly(name as AssistantTool) ||
+        isPanelOnly(name as AssistantTool) ||
         PERSON_CONFIRMS_TOOLS.includes(name as AssistantTool)
       )
         expect(isA2ASkill(name), name).toBe(false);

@@ -61,12 +61,17 @@ identity provider group give Admin), enabling someone above Viewer, resetting so
 two-factor sign-in, and saving the single sign-on or two-factor settings. Disabling and demoting
 people, revoking tokens and the approvals setting don't ask: they take access away rather than
 hand it out. A wrong answer is refused,
-counted against the same limit as other step-ups and audited as `auth.step_up_failed`.
+counted against the same limit as other step-ups and audited as `auth.step_up_failed`. A step-up
+on an assistant card counts for ten minutes on that session: other cards in that time confirm
+without asking again. Changing a role and the approvals setting go through the assistant's cards,
+and only a signed-in admin can make them, never an API token.
 
 - **Add person** (beside **People**): email, optional name and role. The page shows a generated 20-character
   [temporary password](#temporary-passwords) once, with a **Copy** button; send it to them
   privately.
-- **Role:** pick a new one and **Save** appears beside it. You can't lower your own role. Lowering
+- **Role:** pick a new one and **Save** appears beside it. Saving asks on the
+  [assistant](/guides/assistant/#edits-from-a-page)'s confirm card, which asks for the step-up
+  there when you make someone an admin. You can't lower your own role. Lowering
   someone's role revokes the API tokens they made with a role above their new one; their [connected apps](#connected-apps) follow
   the new role on their own.
 - **Actions** (the **⋯** button at the end of a person's row) holds the rest, each confirmed under

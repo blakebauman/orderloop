@@ -73,24 +73,6 @@ export async function approvalSeparation(): Promise<boolean> {
   return separation.value;
 }
 
-export async function setApprovalSeparation(request: Request, by: Principal, on: boolean) {
-  if ((await approvalSeparation()) === on) return;
-  const value = on ? 'on' : 'off';
-  const updatedBy = by.email ?? by.name;
-  await db()
-    .insert(workspaceSettings)
-    .values({ key: APPROVAL_SEPARATION_KEY, value, updatedAt: Date.now(), updatedBy })
-    .onConflictDoUpdate({
-      target: workspaceSettings.key,
-      set: { value, updatedAt: Date.now(), updatedBy },
-    });
-  separation = { value: on, at: Date.now() };
-  await audit(request, 'team.approval_separation', {
-    actor: by,
-    detail: { from: on ? 'off' : 'on', to: value },
-  });
-}
-
 const SSO_KEY = 'sso';
 let sso: { value: SsoSettings; at: number } | null = null;
 

@@ -828,6 +828,21 @@ export async function recordReauth(
   return true;
 }
 
+/**
+ * Records on this session that its person just proved it was them (`stepUp` passed), so the
+ * engine lets this session confirm a sensitive action for the next `STEP_UP_MS`: it reads the time
+ * from the session row itself, never from anything the page sends.
+ */
+export async function recordStepUp(request: Request, by: Principal): Promise<void> {
+  if (by.kind !== 'user') return;
+  const sid = await sessionId(request);
+  if (!sid) return;
+  await db()
+    .update(sessions)
+    .set({ reauthAt: Date.now() })
+    .where(and(eq(sessions.tokenHash, sid), eq(sessions.userId, by.id)));
+}
+
 /** Accepts a code once: the step it matched must be later than the last one used. */
 async function useTotp(
   user: { id: string; totpSecret: string | null; totpLastStep: number | null },

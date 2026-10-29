@@ -26,6 +26,7 @@ import {
   atLeast,
   boundText,
   isPageOnly,
+  isPanelOnly,
   isWriteTool,
   mcpSkillFiles,
   type Principal,
@@ -53,6 +54,7 @@ const DESTRUCTIVE = new Set<AssistantTool>([
   'submit_cart',
   'publish_flow',
   'publish_catalog',
+  'uninstall_plugin',
 ]);
 /** Calling these twice with the same input does nothing more the second time. */
 const IDEMPOTENT = new Set<AssistantTool>([
@@ -157,7 +159,7 @@ async function createServer(p: Principal) {
   );
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {
     const t = ASSISTANT_TOOLS[name];
-    if (!atLeast(p.role, t.role) || isPageOnly(name)) continue;
+    if (!atLeast(p.role, t.role) || isPageOnly(name) || isPanelOnly(name)) continue;
     // A draft runs without a confirm, but it writes (a pending plugin), so it isn't read-only.
     const readOnly = !isWriteTool(name);
     const action = isActionTool(name);
@@ -309,7 +311,7 @@ const handler = createMcpHandler(
 export async function handleMcp(request: Request): Promise<Response> {
   const proxied = await forwardedPrincipal(env, request);
   if (!proxied) return new Response('Unauthorized', { status: 401 });
-  const { session: _session, ...principal } = proxied;
+  const { session: _session, steppedUpAt: _stepped, ...principal } = proxied;
   return handler.fetch(request, {
     authInfo: {
       token: 'proxied',

@@ -16,6 +16,7 @@ import {
   FULFILLMENT_METHODS,
   flowGraphSchema,
   isPageOnly,
+  isPanelOnly,
   MAX_CART_TITLE,
   normalizePromoCode,
   ORDER_CHANNELS,
@@ -23,6 +24,8 @@ import {
   ORDER_STATUSES,
   PROMOTION_KINDS,
   type Principal,
+  pluginCasesSchema,
+  ROLES,
 } from '@orderloop/core';
 import {
   EDIT_SOURCES,
@@ -33,6 +36,7 @@ import {
   TEXT_MAX,
 } from '@orderloop/core/product';
 import { z } from 'zod';
+import { runCases } from './admin';
 import { changeCart, getCart, listCarts, openCart } from './carts';
 import { acceptProductDrafts, discardProductEdits, stageProductEdits } from './catalog';
 import {
@@ -344,6 +348,21 @@ export const TOOL_INPUTS = {
     customerId: z.string().max(100),
     certificateId: z.string().max(100),
   }),
+  set_member_role: z.object({ userId: z.string().max(60), role: z.enum(ROLES) }),
+  set_approval_separation: z.object({ on: z.boolean() }),
+  set_plugin_enabled: z.object({ pluginId: z.string().max(60), enabled: z.boolean() }),
+  approve_plugin: z.object({
+    pluginId: z.string().max(60),
+    sha: z.string().max(80),
+    personalData: z.boolean().optional().describe('Grant buyers’ details, when it asks for them'),
+  }),
+  rollback_plugin: z.object({ pluginId: z.string().max(60), sha: z.string().max(80) }),
+  uninstall_plugin: z.object({ pluginId: z.string().max(60) }),
+  run_plugin_cases: z.object({
+    pluginId: z.string().max(60),
+    sha: z.string().max(80),
+    cases: pluginCasesSchema,
+  }),
   publish_catalog: z.object({
     keys: z.array(productKey).min(1).max(500).describe('Product keys whose staged edits publish'),
   }),
@@ -533,6 +552,13 @@ export const TOOL_OUTPUTS = {
   discard_product_edits: row({ done: z.string(), href: z.string(), discarded: z.number() }),
   publish_catalog: actionOutput.extend({ results: z.array(row({})).optional() }),
   create_promotion: actionOutput,
+  set_member_role: actionOutput,
+  set_approval_separation: actionOutput,
+  set_plugin_enabled: actionOutput,
+  approve_plugin: actionOutput,
+  rollback_plugin: actionOutput,
+  uninstall_plugin: actionOutput,
+  run_plugin_cases: row({ done: z.string(), href: z.string(), results: z.array(row({})) }),
   set_promotion_status: actionOutput,
   verify_tax_certificate: actionOutput,
   revoke_tax_certificate: actionOutput,
@@ -555,6 +581,12 @@ export const ACTION_TOOLS: ActionTool[] = [
   'set_promotion_status',
   'verify_tax_certificate',
   'revoke_tax_certificate',
+  'set_member_role',
+  'set_approval_separation',
+  'set_plugin_enabled',
+  'approve_plugin',
+  'rollback_plugin',
+  'uninstall_plugin',
 ];
 
 export const isActionTool = (name: AssistantTool): name is ActionTool =>
@@ -580,6 +612,8 @@ export async function runTool<T extends AssistantTool>(
     key?: string;
   },
 ): Promise<unknown> {
+  if (isPanelOnly(name) && opts.via !== 'assistant')
+    throw new Refused('This is changed only in the app, by a person signed in.');
   if (isActionTool(name))
     return runAction(
       env,
@@ -633,6 +667,8 @@ export async function runTool<T extends AssistantTool>(
       const i = input as ToolInput<'draft_plugin'>;
       return draftPlugin(env, p, i.instruction, { pluginId: i.pluginId, via: auditVia(opts.via) });
     }
+    case 'run_plugin_cases':
+      return runCases(env, p, input as ToolInput<'run_plugin_cases'>, trailOf(p, name, opts));
     case 'stage_product_edits':
       return stageProductEdits(
         env,

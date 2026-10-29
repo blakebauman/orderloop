@@ -59,4 +59,5 @@ export default [
   route('orders/:orderId/records', 'routes/order-records.ts'),
   route('customers/:customerId/tax-certificates/:certificateId', 'routes/tax-certificate-file.ts'),
   route('account/passkeys', 'routes/account-passkeys.ts'),
+  route('account/step-up', 'routes/account-step-up.ts'),
 ] satisfies RouteConfig;

@@ -35,6 +35,11 @@ export type Principal = {
   name: string;
   email?: string;
   role: Role;
+  /**
+   * When this person's session last proved it was them (a step-up), as the engine read it from the
+   * session; absent for anything but a signed-in session.
+   */
+  steppedUpAt?: number;
 };
 
 /** A session ends this long after sign-in, whatever happens. */

@@ -82,7 +82,14 @@ export type AssistantTool =
   | 'create_promotion'
   | 'set_promotion_status'
   | 'verify_tax_certificate'
-  | 'revoke_tax_certificate';
+  | 'revoke_tax_certificate'
+  | 'set_member_role'
+  | 'set_approval_separation'
+  | 'set_plugin_enabled'
+  | 'approve_plugin'
+  | 'rollback_plugin'
+  | 'uninstall_plugin'
+  | 'run_plugin_cases';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -391,6 +398,61 @@ export const ASSISTANT_TOOLS: Record<
     description:
       'Revoke a customer’s tax exemption certificate, so their new orders are taxed again.',
   },
+  // The Team and Plugins pages' changes, for admins. Those the pages ask a step-up for need one on
+  // the card too (`ActionPreview.stepUp`).
+  set_member_role: {
+    role: 'admin',
+    confirm: true,
+    label: 'Change a role',
+    title: 'Change a person’s role',
+    description:
+      'Change a team member’s role. Lowering it revokes their API tokens above the new role; making someone an admin needs a step-up.',
+  },
+  set_approval_separation: {
+    role: 'admin',
+    confirm: true,
+    label: 'Set approval separation',
+    title: 'Set approval separation',
+    description:
+      'Choose whether people may approve their own orders (and verify tax certificates they added).',
+  },
+  set_plugin_enabled: {
+    role: 'admin',
+    confirm: true,
+    label: 'Turn a plugin on or off',
+    title: 'Turn a plugin on or off',
+    description:
+      'Turn an installed plugin on or off. Off, flows that use it can’t be published and their running steps fail.',
+  },
+  approve_plugin: {
+    role: 'admin',
+    confirm: true,
+    label: 'Install a plugin',
+    title: 'Approve a plugin version',
+    description:
+      'Approve an uploaded or drafted plugin version so it runs. Needs a step-up; a plugin that asks for buyers’ details needs them granted.',
+  },
+  rollback_plugin: {
+    role: 'admin',
+    confirm: true,
+    label: 'Roll a plugin back',
+    title: 'Roll a plugin back',
+    description: 'Run an earlier version of an installed plugin again. Needs a step-up.',
+  },
+  uninstall_plugin: {
+    role: 'admin',
+    confirm: true,
+    label: 'Uninstall a plugin',
+    title: 'Uninstall a plugin',
+    description: 'Uninstall a plugin installed at runtime. Needs a step-up.',
+  },
+  run_plugin_cases: {
+    role: 'admin',
+    confirm: false,
+    label: 'Ran the test cases',
+    title: 'Run a plugin draft’s test cases',
+    description: 'Run test cases against a plugin draft; nothing is installed.',
+  },
 };
 
 /**
@@ -417,6 +479,7 @@ export const WRITES_WITHOUT_CONFIRM: readonly AssistantTool[] = [
   'stage_product_edits',
   'accept_product_drafts',
   'discard_product_edits',
+  'run_plugin_cases',
 ];
 
 /**
@@ -430,6 +493,7 @@ export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = [
   'stage_product_edits',
   'accept_product_drafts',
   'discard_product_edits',
+  'run_plugin_cases',
 ];
 
 export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);
@@ -444,7 +508,22 @@ export const PERSON_CONFIRMS_TOOLS: readonly AssistantTool[] = [
   'set_promotion_status',
   'verify_tax_certificate',
   'revoke_tax_certificate',
+  // Who may do what: only a person on the Team page decides it.
+  'set_member_role',
+  'set_approval_separation',
 ];
+
+/**
+ * Who may do what on the team: only a person signed in to the app, through the assistant panel
+ * (or the Team page's own button). Never offered over MCP or A2A, where a connected app (an OAuth
+ * grant, `kind: 'user'`) or a token could confirm its own call.
+ */
+export const PANEL_ONLY_TOOLS: readonly AssistantTool[] = [
+  'set_member_role',
+  'set_approval_separation',
+];
+
+export const isPanelOnly = (name: AssistantTool) => PANEL_ONLY_TOOLS.includes(name);
 
 /** Whether a tool changes anything: an action, or a write that needs no confirm. */
 export const isWriteTool = (name: AssistantTool) =>
@@ -467,7 +546,17 @@ export type ActionPreview = {
    * its own copy and hands it to the action, which refuses when it no longer holds.
    */
   bound?: Record<string, unknown>;
+  /**
+   * Confirming needs the person to prove it's them first (`STEP_UP_MS`): the card asks for their
+   * password, a code, or single sign-on before it confirms.
+   */
+  stepUp?: true;
 };
+
+/** How long a step-up on a session lets it confirm a sensitive action. */
+export const STEP_UP_MS = 10 * 60_000;
+
+export const STEP_UP_NEEDED = 'Confirm it’s you first, then confirm again.';
 
 /** What `draft_plugin` returns: a pending draft to review on the Plugins page, never running. */
 export type PluginDraftResult = {
