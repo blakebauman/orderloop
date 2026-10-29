@@ -1,5 +1,6 @@
 /**
- * A customer's page: the account as the Commerce page lists it, and its tax exemption certificates,
+ * A customer's page: the account as the Commerce page lists it, the places its orders ship to
+ * (`customer_addresses`, which the engine writes as each order starts), and its tax exemption certificates,
  * which the engine holds (`EngineRpc.taxCertificates`). A certificate's file is stored in the
  * documents bucket at `taxCertificateKey` by the web app before the engine adds the certificate,
  * as a cart's files are; one the engine doesn't end up holding is deleted again.
@@ -16,8 +17,8 @@ import {
   taxCertificateFileProblem,
   taxCertificateKey,
 } from '@orderloop/core';
-import { customers } from '@orderloop/db';
-import { eq } from 'drizzle-orm';
+import { customerAddresses, customers } from '@orderloop/db';
+import { desc, eq } from 'drizzle-orm';
 import { actorName } from './audit.server';
 import { db, docs, engine } from './env.server';
 import { signedActor } from './principal.server';
@@ -25,6 +26,29 @@ import { expiryFrom, parseTaxPlaces } from './tax-certificates';
 
 export async function customerById(id: string) {
   return (await db().select().from(customers).where(eq(customers.id, id)).get()) ?? null;
+}
+
+/** The places the customer's orders ship to, most recently used first; `more` when there are others. */
+export async function addressesOf(customerId: string, limit: number) {
+  const rows = await db()
+    .select({
+      id: customerAddresses.id,
+      name: customerAddresses.name,
+      line1: customerAddresses.line1,
+      line2: customerAddresses.line2,
+      city: customerAddresses.city,
+      region: customerAddresses.region,
+      postalCode: customerAddresses.postalCode,
+      country: customerAddresses.country,
+      orders: customerAddresses.orders,
+      lastUsedAt: customerAddresses.lastUsedAt,
+      lastOrderId: customerAddresses.lastOrderId,
+    })
+    .from(customerAddresses)
+    .where(eq(customerAddresses.customerId, customerId))
+    .orderBy(desc(customerAddresses.lastUsedAt))
+    .limit(limit + 1);
+  return { list: rows.slice(0, limit), more: rows.length > limit };
 }
 
 /** The engine call's actor: the person, signed for this customer's certificates alone. */

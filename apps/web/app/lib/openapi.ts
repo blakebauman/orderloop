@@ -897,7 +897,7 @@ export function openApiDocument(serverUrl: string) {
           requestBody: body(dataSubjectInput),
           responses: {
             '200': ok(
-              'A JSON file: { email, customers, orders, messages, inboundEmails, documents, carts, taxCertificates, truncated, teamMember }',
+              'A JSON file: { email, customers, orders, messages, inboundEmails, documents, carts, taxCertificates, addresses, truncated, teamMember }',
             ),
             ...errors,
           },
@@ -911,7 +911,7 @@ export function openApiDocument(serverUrl: string) {
           requestBody: body(dataSubjectInput),
           responses: {
             '200': ok(
-              '{ ok, done, orders, customers, documents, messages, inboundEmails, carts, taxCertificates, teamMember }',
+              '{ ok, done, orders, customers, documents, messages, inboundEmails, carts, taxCertificates, addresses, teamMember }',
             ),
             '409': ok('{ reason: "active_orders", orders }'),
             ...errors,

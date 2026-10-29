@@ -5,7 +5,8 @@
  * (`AUDIT_RETENTION_DAYS`, 400 days unless set) are archived to R2 first, then deleted. Where a
  * deployment sets `PERSONAL_DATA_RETENTION_DAYS`, orders finished longer ago than that lose their
  * buyer's personal data, as an erasure request would remove it (`eraseOrders`); the commercial
- * record stays. Stored secrets are resealed under the current `DATA_KEY` (`resealSecrets`).
+ * record stays, and the customer addresses last shipped to before then are deleted. Stored
+ * secrets are resealed under the current `DATA_KEY` (`resealSecrets`).
  */
 
 import {
@@ -19,6 +20,7 @@ import {
   carts,
   checkoutSessions,
   createDb,
+  customerAddresses,
   inboundEmails,
   nodeRuns,
   orders,
@@ -113,6 +115,7 @@ export async function sweep(env: Env, now = Date.now()) {
     cartsPurged: await purgeEndedCarts(env, now),
     cartBuyersIndexed: await indexCartBuyers(env),
     personalDataErased: await expirePersonalData(env, now),
+    addressesExpired: await expireAddresses(env, now),
     confirmations: await pruneConfirmations(env, now),
     aiUsageDays: await pruneUsage(env, now),
     secrets: await resealSecrets(env),
@@ -294,4 +297,18 @@ export async function expirePersonalData(env: Env, now = Date.now()) {
   if (r.refused.length)
     console.warn(JSON.stringify({ type: 'personal_data_retention_skipped', orders: r.refused }));
   return r.orders;
+}
+
+/**
+ * Deletes the customer addresses last shipped to before the deployment's personal data retention:
+ * the orders that used them have lost their ship-to by then. Returns how many.
+ */
+export async function expireAddresses(env: Env, now = Date.now()) {
+  const days = personalDataRetentionDays(env.PERSONAL_DATA_RETENTION_DAYS);
+  if (days === null) return 0;
+  const gone = await createDb(env.DB)
+    .delete(customerAddresses)
+    .where(lt(customerAddresses.lastUsedAt, now - days * DAY))
+    .returning({ id: customerAddresses.id });
+  return gone.length;
 }

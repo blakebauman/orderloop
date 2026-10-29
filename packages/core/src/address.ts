@@ -214,3 +214,25 @@ export function checkAddress(input: unknown): AddressCheck {
   const changed = FIELDS.some((f) => (out[f] ?? '') !== (typeof raw[f] === 'string' ? raw[f] : ''));
   return { status: changed ? 'corrected' : 'valid', address: out, issues: [] };
 }
+
+/**
+ * A customer's ship-to as it is remembered (`customer_addresses`): the normalised address, and
+ * the key two orders to the same place share. The recipient's name isn't in the key, so a new
+ * name on a known address updates it instead of adding another.
+ */
+export function rememberedAddress(input: unknown): { key: string; address: ShipAddress } | null {
+  const check = checkAddress(input);
+  if (check.status === 'invalid' || !check.address) return null;
+  const address = check.address as ShipAddress;
+  const key = [
+    address.line1,
+    address.line2,
+    address.city,
+    address.region,
+    address.postalCode,
+    address.country,
+  ]
+    .map((v) => (v ?? '').toLowerCase())
+    .join('|');
+  return { key, address };
+}
