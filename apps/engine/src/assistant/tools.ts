@@ -13,6 +13,8 @@ import {
   assessQuestionsSchema,
   CART_STATUSES,
   cartOpSchema,
+  FULFILLMENT_METHODS,
+  isPageOnly,
   MAX_CART_TITLE,
   ORDER_CHANNELS,
   ORDER_MODELS,
@@ -29,6 +31,7 @@ import { changeCart, getCart, listCarts, openCart } from './carts';
 import {
   type ActionInput,
   type ActionTool,
+  AUDIT_CHANNEL,
   assessOrder,
   attention,
   type Channel,
@@ -39,9 +42,11 @@ import {
   getOrder,
   listFlows,
   proposeFlowChange,
+  Refused,
   requireRole,
   runAction,
 } from './data';
+import { startScenario } from './orders';
 import { draftPlugin } from './plugin-draft';
 import { draftProductContent } from './product-draft';
 
@@ -189,6 +194,38 @@ export const TOOL_INPUTS = {
   }),
   publish_flow: z.object({ flowId: z.string() }),
   run_stock_review: z.object({}),
+  start_order: z.object({
+    flowId: z.string().max(100).describe('A published flow (list_flows)'),
+    title: z.string().max(140).optional(),
+    channel: z
+      .enum(ORDER_CHANNELS)
+      .optional()
+      .describe('Where the order came from; manual if unsaid'),
+    customerId: z.string().max(100).optional(),
+    contact: z
+      .object({ email: z.email().max(200), name: z.string().max(120).optional() })
+      .optional()
+      .describe('A guest buyer, when there is no customer'),
+    fulfillment: z
+      .object({
+        method: z.enum(FULFILLMENT_METHODS),
+        locationId: z.string().max(100).optional(),
+      })
+      .optional(),
+    currency: z.string().length(3).optional(),
+    lines: z
+      .array(
+        z.object({
+          sku: z.string().min(1).max(100),
+          qty: z.number().int().positive().max(1_000_000),
+        }),
+      )
+      .max(100),
+    documentText: z.string().max(20_000).optional().describe('Text the flow reads (a PO or email)'),
+  }),
+  restart_order: z.object({ orderId }),
+  start_scenario: z.object({ scenarioId: z.string().max(60).describe('A demo scenario id') }),
+  cancel_cart: z.object({ cartId }),
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export type ToolInput<T extends AssistantTool> = z.infer<(typeof TOOL_INPUTS)[T]>;
@@ -355,6 +392,10 @@ export const TOOL_OUTPUTS = {
   submit_cart: actionOutput,
   publish_flow: actionOutput,
   run_stock_review: actionOutput,
+  start_order: actionOutput,
+  restart_order: actionOutput,
+  start_scenario: actionOutput,
+  cancel_cart: actionOutput,
 } satisfies Record<AssistantTool, z.ZodObject>;
 
 export const ACTION_TOOLS: ActionTool[] = [
@@ -365,6 +406,9 @@ export const ACTION_TOOLS: ActionTool[] = [
   'submit_cart',
   'publish_flow',
   'run_stock_review',
+  'start_order',
+  'restart_order',
+  'cancel_cart',
 ];
 
 export const isActionTool = (name: AssistantTool): name is ActionTool =>
@@ -381,7 +425,14 @@ export async function runTool<T extends AssistantTool>(
   p: Principal,
   name: T,
   input: ToolInput<T>,
-  opts: { via: Channel; context?: AssistantContext; confirmed?: Confirmed; direct?: boolean },
+  opts: {
+    via: Channel;
+    context?: AssistantContext;
+    confirmed?: Confirmed;
+    direct?: boolean;
+    /** Unique to this call (a page's `act` id): an order it starts, it starts once. */
+    key?: string;
+  },
 ): Promise<unknown> {
   if (isActionTool(name))
     return runAction(
@@ -392,8 +443,11 @@ export async function runTool<T extends AssistantTool>(
       opts.via,
       opts.confirmed,
       opts.direct,
+      opts.key,
     );
   requireRole(p, name);
+  // Only from the page's own button: the model, MCP and A2A never see it, and can't call it.
+  if (isPageOnly(name) && !opts.direct) throw new Refused('This runs only from its page.');
   switch (name) {
     case 'needs_attention':
       return attention(env);
@@ -433,6 +487,12 @@ export async function runTool<T extends AssistantTool>(
       const i = input as ToolInput<'draft_plugin'>;
       return draftPlugin(env, p, i.instruction, { pluginId: i.pluginId, via: auditVia(opts.via) });
     }
+    case 'start_scenario':
+      return startScenario(env, p, (input as ToolInput<'start_scenario'>).scenarioId, {
+        via: AUDIT_CHANNEL[opts.via],
+        tool: 'start_scenario',
+        ...(opts.direct ? { direct: true } : {}),
+      });
     case 'draft_product_content': {
       const { key, ...request } = input as ToolInput<'draft_product_content'>;
       return draftProductContent(env, p, key, request, auditVia(opts.via));

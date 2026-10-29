@@ -25,6 +25,7 @@ import {
   type AssistantTool,
   atLeast,
   boundText,
+  isPageOnly,
   isWriteTool,
   mcpSkillFiles,
   type Principal,
@@ -68,6 +69,9 @@ const OPEN_WORLD = new Set<AssistantTool>([
   'cancel_order',
   'submit_cart',
   'run_stock_review',
+  'start_order',
+  'restart_order',
+  'start_scenario',
   'assess_order',
 ]);
 
@@ -151,7 +155,7 @@ async function createServer(p: Principal) {
   );
   for (const name of Object.keys(ASSISTANT_TOOLS) as AssistantTool[]) {
     const t = ASSISTANT_TOOLS[name];
-    if (!atLeast(p.role, t.role)) continue;
+    if (!atLeast(p.role, t.role) || isPageOnly(name)) continue;
     // A draft runs without a confirm, but it writes (a pending plugin), so it isn't read-only.
     const readOnly = !isWriteTool(name);
     const action = isActionTool(name);

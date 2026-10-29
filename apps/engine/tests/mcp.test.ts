@@ -238,7 +238,9 @@ describe('MCP', () => {
     });
     expect(viewer.every((t) => t.outputSchema)).toBe(true);
     const operator = await tools(person('operator', 'ops@example.com'));
-    expect(operator).toHaveLength(20);
+    expect(operator).toHaveLength(23);
+    // A demo scenario starts only from its page's button: never listed here.
+    expect(operator.find((t) => t.name === 'start_scenario')).toBeUndefined();
     expect(operator.find((t) => t.name === 'decide_approvals')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
     });
@@ -263,7 +265,7 @@ describe('MCP', () => {
       inputSchema: { properties: { cartId: {}, confirmation: {} } },
     });
     const admin = await tools(person('admin', 'ann@example.com'));
-    expect(admin).toHaveLength(21);
+    expect(admin).toHaveLength(24);
     expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       outputSchema: { type: 'object', properties: { id: {}, cases: {}, href: {} } },

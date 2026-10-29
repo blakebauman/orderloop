@@ -19,6 +19,7 @@ import {
   type CartStatus,
   cartReadyProblem,
   cartShippingOption,
+  isFinalCart,
   isQuoteCurrent,
   type Principal,
   ROLE_LABELS,
@@ -27,7 +28,13 @@ import {
 import { carts, createDb, customers, flows } from '@orderloop/db';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import { recordAudit } from '../audit';
-import { changeCart as applyToCart, createCart, staffCart, submitCart } from '../cart/carts';
+import {
+  changeCart as applyToCart,
+  cancelCart,
+  createCart,
+  staffCart,
+  submitCart,
+} from '../cart/carts';
 import { AUDIT_CHANNEL, type Channel, type Confirmed, money, orderRef, Refused } from './data';
 
 /** A cart's own words, one bounded line, for the model. */
@@ -184,6 +191,36 @@ export async function changeCart(
     });
   }
   return { ...(await getCart(env, c.id)), applied };
+}
+
+export async function previewCancelCart(
+  env: Env,
+  cartId: string,
+  roleBlock?: string,
+): Promise<ActionPreview> {
+  const c = await loadCart(env, cartId);
+  return {
+    title: `Cancel the cart ${c.id}`,
+    href: `/carts/${c.id}`,
+    consequences: [
+      `${c.lines.length} line${c.lines.length === 1 ? '' : 's'}; nothing is ordered`,
+      'The cart ends: nobody can change or submit it again',
+    ],
+    blocked: roleBlock ?? (isFinalCart(c) ? `The cart is ${c.status}.` : undefined),
+  };
+}
+
+export async function runCancelCart(
+  env: Env,
+  p: Principal,
+  cartId: string,
+  trail: Record<string, unknown>,
+) {
+  const c = await loadCart(env, cartId);
+  const r = await cancelCart(env, c.id, staffCartActor(p));
+  if (!r.ok) throw new Refused(r.error);
+  await recordAudit(env, 'cart.canceled', { actor: p, target: c.id, detail: trail });
+  return { done: `Cancelled the cart ${c.id}`, href: `/carts/${c.id}` };
 }
 
 /** A cart that moved on from the version a caller says it read. */

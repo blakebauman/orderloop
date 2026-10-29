@@ -720,6 +720,150 @@ describe('assistant socket', () => {
     panel.close();
   });
 
+  it('starts, restarts and cancels on their cards, once each, keeping no contact in the store', async () => {
+    const waiting = await waitingOrder();
+    const op = await who('operator', 'starts@example.com');
+    const panel = await socket(op.id, op);
+    const answer = async (tool: string, input: unknown) => {
+      const asked = await panel.call('act', [tool, input]);
+      expect(asked.success).toBe(true);
+      const { callId } = asked.result as { callId: string };
+      const card = await panel.call('preview', [tool, input, callId]);
+      return {
+        callId,
+        card: card.result as { title: string; blocked?: string; consequences: string[] },
+      };
+    };
+
+    // An unknown SKU is said on the card, before anything starts.
+    const bad = await answer('start_order', {
+      flowId: 'tpl-b2b-order',
+      lines: [{ sku: 'NOPE-1', qty: 1 }],
+    });
+    expect(bad.card.blocked).toBe('Not in the catalog: NOPE-1.');
+
+    const input = {
+      flowId: 'tpl-b2b-order',
+      contact: { email: 'buyer@example.com' },
+      lines: [{ sku: 'WID-100', qty: 2 }],
+    };
+    const ok = await answer('start_order', input);
+    expect(ok.card.blocked).toBeUndefined();
+    expect(ok.card.consequences[0]).toBe('1 line: WID-100 × 2');
+    const started = (await panel.call('resolve', [ok.callId, true])).result as {
+      output: { orderId: string };
+    };
+    expect(started.output.orderId).toMatch(/^ord_/);
+    // Answered, the stored card keeps only its ids: the contact is gone.
+    const stored = await runInDurableObject(
+      env.ASSISTANT_AGENT.getByName(op.id),
+      (agent: AssistantAgent) =>
+        agent.messages
+          .flatMap((m) => m.parts)
+          .find((x) => (x as { toolCallId?: string }).toolCallId === ok.callId),
+    );
+    expect(JSON.stringify(stored)).not.toContain('buyer@example.com');
+    // The same confirm, run again (an answer retried after a restart), finds the order it started.
+    const again = (await runAction(
+      env,
+      strip(op),
+      'start_order',
+      input,
+      'assistant',
+      undefined,
+      true,
+      ok.callId,
+    )) as { orderId: string };
+    expect(again.orderId).toBe(started.output.orderId);
+
+    const restart = await answer('restart_order', { orderId: waiting });
+    expect(restart.card.title).toMatch(/^Restart #/);
+    const restarted = (await panel.call('resolve', [restart.callId, true])).result as {
+      output: { orderId: string };
+    };
+    expect((await state(restarted.output.orderId)).order?.meta).toMatchObject({
+      restartedFrom: waiting,
+    });
+
+    const cart = (
+      await panel.call('act', ['create_cart', { title: 'To cancel', flowId: 'tpl-b2b-order' }])
+    ).result as { output: { id: string } };
+    const cancel = await answer('cancel_cart', { cartId: cart.output.id });
+    await panel.call('resolve', [cancel.callId, true]);
+    const after = (await runTool(
+      env,
+      strip(op),
+      'get_cart',
+      { cartId: cart.output.id },
+      {
+        via: 'assistant',
+      },
+    )) as { status: string };
+    expect(after.status).toBe('canceled');
+    expect(
+      (await previewAction(env, strip(op), 'cancel_cart', { cartId: cart.output.id })).blocked,
+    ).toBe('The cart is canceled.');
+
+    // A card left unanswered for a day is let go, and its contact with it.
+    const left = await answer('start_order', { ...input, title: 'Left' });
+    await runInDurableObject(
+      env.ASSISTANT_AGENT.getByName(op.id),
+      async (_agent: AssistantAgent, state) => {
+        const key = `direct:${left.callId}`;
+        const held = (await state.storage.get(key)) as Record<string, unknown>;
+        await state.storage.put(key, { ...held, at: 0 });
+      },
+    );
+    await panel.call('act', ['list_carts', {}]);
+    const lapsed = await runInDurableObject(
+      env.ASSISTANT_AGENT.getByName(op.id),
+      (agent: AssistantAgent) =>
+        agent.messages
+          .flatMap((m) => m.parts)
+          .find((x) => (x as { toolCallId?: string }).toolCallId === left.callId),
+    );
+    expect(lapsed).toMatchObject({ state: 'output-denied' });
+    expect(JSON.stringify(lapsed)).not.toContain('buyer@example.com');
+
+    // The card names what the order acts on.
+    const said = await previewAction(env, strip(op), 'start_order', {
+      flowId: 'tpl-b2b-order',
+      contact: { email: 'guest@example.com' },
+      lines: [],
+      documentText: 'PO 991: 40 x WID-100',
+    });
+    expect(said.consequences).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('guest@example.com'),
+        expect.stringContaining('“PO 991: 40 x WID-100”'),
+      ]),
+    );
+    expect(
+      (
+        await previewAction(env, strip(op), 'start_order', {
+          ...input,
+          customerId: 'cus_contoso',
+        })
+      ).blocked,
+    ).toBe('Choose a customer or a guest contact, not both.');
+
+    // A viewer can't start one, and a demo scenario runs only from its page's button.
+    const viewer = strip(await who('viewer', 'starts-viewer@example.com'));
+    expect((await previewAction(env, viewer, 'start_order', input)).blocked).toBe(
+      'This needs the Operator role.',
+    );
+    await expect(
+      runTool(env, strip(op), 'start_scenario', { scenarioId: 'anything' }, { via: 'MCP' }),
+    ).rejects.toThrow('This runs only from its page.');
+
+    // A scenario that isn't there is refused, with nothing started.
+    expect(await panel.call('act', ['start_scenario', { scenarioId: 'nope' }])).toMatchObject({
+      success: false,
+      error: 'That demo scenario isn’t available here.',
+    });
+    panel.close();
+  });
+
   it('opens only for its own person, and stops when their sign-in ends', async () => {
     const orderId = await waitingOrder();
     const kim = await who('viewer', 'kim@example.com');

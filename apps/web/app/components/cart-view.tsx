@@ -163,7 +163,7 @@ export function CartView({
   // Staff edit through the assistant, as its own tool calls (a submit stops at its confirm card);
   // the buyer, who has no assistant, calls the cart directly.
   const assistant = useAssistantIfAny();
-  async function viaAssistant(tool: 'change_cart' | 'submit_cart', input: unknown) {
+  async function viaAssistant(tool: 'change_cart' | 'submit_cart' | 'cancel_cart', input: unknown) {
     setBusy(true);
     setError(null);
     try {
@@ -256,25 +256,38 @@ export function CartView({
               >
                 {cart.status === 'locked' ? 'Unlock' : 'Lock'}
               </Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={busy}>
-                    Cancel cart
-                  </Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Cancel this cart?</AlertDialogTitle>
-                    <AlertDialogDescription>It can’t be reopened.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Keep the cart</AlertDialogCancel>
-                    <AlertDialogAction variant="destructive" onClick={() => void call('cancel')}>
+              {/* A staff cart cancels through the assistant, whose card is the confirm. An external
+                  cart belongs to its buyer's page and stays out of the assistant. */}
+              {assistant && !cart.external ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => void viaAssistant('cancel_cart', { cartId: cart.id })}
+                >
+                  Cancel cart
+                </Button>
+              ) : (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" disabled={busy}>
                       Cancel cart
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Cancel this cart?</AlertDialogTitle>
+                      <AlertDialogDescription>It can’t be reopened.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Keep the cart</AlertDialogCancel>
+                      <AlertDialogAction variant="destructive" onClick={() => void call('cancel')}>
+                        Cancel cart
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
               <Button
                 size="sm"
                 disabled={busy || !!ready || !!cart.external}

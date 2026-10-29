@@ -59,7 +59,6 @@ import {
   type ShouldRevalidateFunctionArgs,
   useFetcher,
   useLoaderData,
-  useNavigate,
   useSearchParams,
 } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -71,7 +70,7 @@ import { Empty, Section } from '~/components/page';
 import { ShareButton } from '~/components/share-button';
 import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
-import { useAssistant, usePageContext } from '~/lib/assistant';
+import { useAssistant, usePageContext, useStartOrder } from '~/lib/assistant';
 import { actor, requireUser } from '~/lib/auth.server';
 import { useMedia, WIDE } from '~/lib/device';
 import { engine } from '~/lib/env.server';
@@ -794,23 +793,16 @@ function Compensation({
           </p>
         ) : null}
       </Section>
-      {state.rollback ? (
-        <NextSteps orderId={state.orderId!} customer={state.order?.customerId} />
-      ) : null}
+      {state.rollback ? <NextSteps orderId={state.orderId!} /> : null}
     </section>
   );
 }
 
 /** After a rollback: try again with the same lines, or look at what blocked it. */
-function NextSteps({ orderId, customer }: { orderId: string; customer?: string }) {
-  const restart = useFetcher<{ ok: boolean; orderId?: string; error?: string }>();
-  const navigate = useNavigate();
-  const [confirming, setConfirming] = useState(false);
+function NextSteps({ orderId }: { orderId: string }) {
+  // Through the assistant: its card says what the new order will be, and opens it once started.
+  const restart = useStartOrder();
   const canOperate = useCan('operator');
-  useEffect(() => {
-    if (restart.state === 'idle' && restart.data?.orderId)
-      navigate(`/orders/${restart.data.orderId}`);
-  }, [restart.state, restart.data, navigate]);
   return (
     <Section
       title="Next"
@@ -826,35 +818,21 @@ function NextSteps({ orderId, customer }: { orderId: string; customer?: string }
       }
     >
       <div className="flex flex-wrap items-center gap-2">
-        {confirming ? (
-          <restart.Form
-            method="post"
-            action={`/orders/${orderId}/action`}
-            className="flex flex-wrap items-center gap-2"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setConfirming(false);
-            }}
+        {canOperate ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!!restart.busy}
+            onClick={() => void restart.start('restart', 'restart_order', { orderId })}
           >
-            <input type="hidden" name="intent" value="restart" />
-            <span className="text-sm">
-              Start a new order{customer ? ' for the same customer' : ''} with these lines?
-            </span>
-            <Button size="sm" disabled={restart.state !== 'idle'}>
-              {restart.state !== 'idle' ? 'Starting…' : 'Start new order'}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={() => setConfirming(false)}>
-              Not now
-            </Button>
-          </restart.Form>
-        ) : canOperate ? (
-          <Button size="sm" variant="outline" onClick={() => setConfirming(true)}>
-            <RotateCcw /> Start again with the same lines
+            <RotateCcw />{' '}
+            {restart.busy ? 'Confirm it in the assistant' : 'Start again with the same lines'}
           </Button>
         ) : null}
       </div>
-      {restart.data?.error ? (
+      {restart.error ? (
         <p className="mt-2 text-bad text-sm" role="alert">
-          {restart.data.error}
+          {restart.error.message}
         </p>
       ) : null}
     </Section>
