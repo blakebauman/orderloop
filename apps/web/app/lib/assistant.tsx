@@ -67,6 +67,11 @@ type AssistantState = {
   /** A card `act` made, waiting for the person's answer, and the page waiting on it. */
   awaitAnswer: (callId: string, act: QueuedAct) => void;
   answered: (callId: string, r: ActResult | Error) => void;
+  /** What the panel shows: the conversation, or the chat of the cart the page is on. */
+  view: 'assistant' | 'thread';
+  setView: (v: 'assistant' | 'thread') => void;
+  /** Opens the panel on this cart's chat (the staff cart page's Chat button). */
+  openThread: () => void;
   /** A proposal handed to the flow editor; the editor takes it when it is open on that flow. */
   proposal: FlowProposal | null;
   offerProposal: (p: FlowProposal) => void;
@@ -93,6 +98,7 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
   // (React's strict mode, a remount) never sends the same edit twice. `acts` re-renders the panel.
   const queue = useRef<QueuedAct[]>([]);
   const [acts, setActs] = useState<QueuedAct[]>([]);
+  const [view, setView] = useState<'assistant' | 'thread'>('assistant');
   const waiting = useRef(new Map<string, QueuedAct>());
 
   // Reopen the panel on the next visit if it was open; a convenience, so storage may fail.
@@ -162,6 +168,12 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
         if (r instanceof Error) act?.reject(r);
         else act?.resolve(r);
       },
+      view,
+      setView,
+      openThread: () => {
+        setView('thread');
+        setOpen(true);
+      },
       pendingAsk,
       takeAsk: () => {
         const t = pendingAsk;
@@ -186,7 +198,19 @@ export function AssistantProvider({ children }: { children: React.ReactNode }) {
       },
       proposalToken,
     }),
-    [open, setOpen, acts, pendingAsk, focusToken, page, scope, register, proposal, proposalToken],
+    [
+      open,
+      setOpen,
+      acts,
+      view,
+      pendingAsk,
+      focusToken,
+      page,
+      scope,
+      register,
+      proposal,
+      proposalToken,
+    ],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -217,6 +241,7 @@ export function usePageContext(read: PageContext, deps: unknown[]) {
 export function contextLabel(c: AssistantContext): string {
   if (c.kind === 'order') return c.label;
   if (c.kind === 'flow') return c.label;
+  if (c.kind === 'cart') return c.label;
   return 'Everything';
 }
 

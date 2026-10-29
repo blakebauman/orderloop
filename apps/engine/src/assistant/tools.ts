@@ -37,6 +37,7 @@ import {
 } from '@orderloop/core/product';
 import { z } from 'zod';
 import { runCases } from './admin';
+import { draftCartReply } from './cart-reply';
 import { changeCart, getCart, listCarts, openCart } from './carts';
 import { acceptProductDrafts, discardProductEdits, stageProductEdits } from './catalog';
 import {
@@ -253,6 +254,10 @@ export const TOOL_INPUTS = {
   restart_order: z.object({ orderId }),
   start_scenario: z.object({ scenarioId: z.string().max(60).describe('A demo scenario id') }),
   cancel_cart: z.object({ cartId }),
+  draft_cart_reply: z.object({
+    cartId,
+    instruction: z.string().max(500).optional().describe('What the reply should say'),
+  }),
   save_flow_draft: z.object({
     flowId: z.string().max(60),
     name: z.string().min(1).max(80),
@@ -536,6 +541,7 @@ export const TOOL_OUTPUTS = {
   restart_order: actionOutput,
   start_scenario: actionOutput,
   cancel_cart: actionOutput,
+  draft_cart_reply: row({ done: z.string(), href: z.string(), draft: z.string() }),
   save_flow_draft: row({
     done: z.string(),
     href: z.string(),
@@ -701,6 +707,10 @@ export async function runTool<T extends AssistantTool>(
     case 'archive_flow': {
       const i = input as ToolInput<'archive_flow'>;
       return setFlowArchived(env, p, i.flowId, i.archived, trailOf(p, name, opts));
+    }
+    case 'draft_cart_reply': {
+      const i = input as ToolInput<'draft_cart_reply'>;
+      return draftCartReply(env, p, i.cartId, i.instruction, trailOf(p, name, opts));
     }
     case 'start_scenario':
       return startScenario(

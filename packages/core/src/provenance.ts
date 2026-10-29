@@ -19,6 +19,7 @@ export const AI_PROMPTS = {
   assistant: 1,
   plugin_draft: 1,
   product_draft: 1,
+  cart_reply: 1,
 } as const;
 
 export type AiPrompt = keyof typeof AI_PROMPTS;

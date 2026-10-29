@@ -82,6 +82,10 @@ Three things are different:
   for the person who is asking and what their role may see. Its `assess_order` tool follows the
   rules above.
 - **The flow copilot** sends flow graphs and the node catalog, not order data.
+- **A drafted cart reply** (the cart Thread's **Draft a reply**) sends the cart chat's newest 30
+  messages, authors as buyer, you or staff and never their names, with personal details masked
+  unless the deployment sends personal data. It has no tools, and nothing is sent until a person
+  sends the draft.
 
 Instructions you write for the router and for Assess go to the model as written.
 

@@ -5,7 +5,8 @@
  * more. External carts belong to their buyer's page and aren't reached from here.
  *
  * What a cart says is people's text (its title, its lines' names, the quote's problems): it goes
- * to the model bounded to a line each, as data, and its chat and files never do.
+ * to the model bounded to a line each, as data. Its files never do, and its chat only to draft a
+ * staff reply (`cart-reply.ts`), in a call with no tools whose draft a person sends or doesn't.
  */
 
 import {

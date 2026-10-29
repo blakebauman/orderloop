@@ -488,6 +488,8 @@ export function readContext(raw: unknown): AssistantContext {
       ...(typeof c.model === 'string' ? { model: c.model } : {}),
     };
   }
+  if (c.kind === 'cart' && typeof c.id === 'string' && /^cart_[\w-]{1,80}$/.test(c.id))
+    return { kind: 'cart', id: c.id, label: c.id };
   return { kind: 'workspace' };
 }
 
@@ -497,7 +499,9 @@ function systemPrompt(p: Principal, context: AssistantContext) {
       ? `They are looking at order ${context.id} (${context.label}). “This order” means that one.`
       : context.kind === 'flow'
         ? `They are editing the flow ${context.id} (${context.label}). “This flow” means that one; proposals start from the graph on their screen.`
-        : 'They are not looking at a particular order or flow.';
+        : context.kind === 'cart'
+          ? `They are looking at the cart ${context.id}. “This cart” means that one.`
+          : 'They are not looking at a particular order, flow or cart.';
   return [
     'You are the OrderLoop assistant, working for one person in an order-operations team. OrderLoop runs every order as a flow graph of steps; people step in at approvals, events and exceptions.',
     `The person is ${p.name}${p.email ? ` <${p.email}>` : ''}, role ${p.role}. ${where}`,

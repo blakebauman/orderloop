@@ -7,7 +7,7 @@ import type { GraphIssue } from './graph';
 import type { Role } from './roles';
 import type { FlowGraph } from './types';
 
-/** What the assistant is looking at: everything, or the order or flow open on the page. */
+/** What the assistant is looking at: everything, or the order, flow or cart open on the page. */
 export type AssistantContext =
   | { kind: 'workspace' }
   | {
@@ -24,6 +24,12 @@ export type AssistantContext =
       /** The editor's graph, unsaved changes included, so a proposal builds on what is on screen. */
       graph?: FlowGraph;
       model?: string;
+    }
+  | {
+      kind: 'cart';
+      id: string;
+      /** The cart's id, never its title: a title is people's words. */
+      label: string;
     };
 
 /** What is waiting on a person, for the line at the top of the panel. */
@@ -89,7 +95,8 @@ export type AssistantTool =
   | 'approve_plugin'
   | 'rollback_plugin'
   | 'uninstall_plugin'
-  | 'run_plugin_cases';
+  | 'run_plugin_cases'
+  | 'draft_cart_reply';
 
 /**
  * Who may use each tool, and which ones stop for a person to confirm. Reads and drafts run
@@ -453,6 +460,15 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Run a plugin draft’s test cases',
     description: 'Run test cases against a plugin draft; nothing is installed.',
   },
+  draft_cart_reply: {
+    role: 'viewer',
+    // The Cart thread's own button (`PAGE_ONLY_TOOLS`): a draft for a person to send, or not.
+    confirm: false,
+    label: 'Drafted a reply',
+    title: 'Draft a reply in a cart’s chat',
+    description:
+      'Draft a staff reply to a cart’s chat from its latest messages. Nothing is sent: the draft fills the composer.',
+  },
 };
 
 /**
@@ -494,6 +510,7 @@ export const PAGE_ONLY_TOOLS: readonly AssistantTool[] = [
   'accept_product_drafts',
   'discard_product_edits',
   'run_plugin_cases',
+  'draft_cart_reply',
 ];
 
 export const isPageOnly = (name: AssistantTool) => PAGE_ONLY_TOOLS.includes(name);

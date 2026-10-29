@@ -157,6 +157,12 @@ role and the approvals setting are a signed-in person's alone, in the app: they 
 over MCP or A2A. Running a plugin draft's test cases (`run_plugin_cases`) runs from
 the Plugins page only.
 
+`draft_cart_reply` is the Thread's **Draft a reply**, and runs only from it. It reads the cart's
+newest 30 messages and drafts the next one. Authors are named only as buyer, you or staff, and
+the messages are masked unless the deployment sends personal data to the model. The call has no
+tools, so nothing a buyer wrote can make it act, and the draft is never sent for you. A link the chat doesn't already hold is removed from the
+draft. A cart's chat reaches a model only here.
+
 The Catalog page's staging, accepting and dropping (`stage_product_edits`, `accept_product_drafts`,
 `discard_product_edits`) run only from its buttons, since each overwrites or drops what waits to
 publish. The assistant drafts with `draft_product_content`, and a person accepts.

@@ -1110,6 +1110,18 @@ export class CartAgent extends Agent<Env, CartState> {
     return { ok: true };
   }
 
+  /**
+   * The newest messages, oldest first, for drafting a staff reply (`draft_cart_reply`). Engine
+   * only: never on the socket, where `history` checks who asks.
+   */
+  async recentChat(limit = 30): Promise<CartChatMessage[]> {
+    limit = Math.min(Math.max(Math.trunc(limit) || 1, 1), CART_CHAT_BROADCAST);
+    this.tables();
+    return this.sql<ChatRow>`SELECT * FROM cart_chat ORDER BY seq DESC LIMIT ${limit}`
+      .map(fromRow)
+      .reverse();
+  }
+
   /** Up to 50 messages before the one with id `before` (or the newest), oldest first. */
   @callable()
   async history(before?: string): Promise<CartChatMessage[]> {

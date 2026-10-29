@@ -254,6 +254,16 @@ Step-up on cards (`apps/engine/src/assistant/admin.ts`):
 - **Not moved.** Disabling or enabling a person stays on the Team page, because it revokes OAuth grants that only the web app can reach.
 - **Web code.** `setRole` and `setApprovalSeparation` left the web app. The REST API's `pluginAction` is unchanged.
 
+Staff cart chat lives in the panel. A staff cart page registers a `cart` context, by id only. The
+panel shows an Assistant | Thread switch, and `CartThread` (`components/assistant/cart-thread.tsx`)
+opens its own CartAgent socket and reuses `Chat` from `cart-view.tsx`. The guest page keeps its
+inline chat. `draft_cart_reply` (`apps/engine/src/assistant/cart-reply.ts`) is page-only:
+- it reads `CartAgent.recentChat`, an engine-only method, not `@callable`;
+- it calls `runJson` with prompt `cart_reply@1` and no tools, the thread in one `dataBlock`, authors as roles, and bodies through `maskPersonalText` unless `AI_PERSONAL_DATA` is `send`;
+- it checks and records the assistant budget, and `canReadCart` for the person;
+- it removes any URL the thread doesn't already contain;
+- it returns the draft to the page, while the conversation keeps only `done`.
+
 Approval decisions go through these cards too, including the inbox's batch, as one
 `decide_approvals` card that runs `decide_approval` for each row. Outside events recorded on
 Commerce and on the order page are `deliver_event` cards. No page has an undo window any more.
