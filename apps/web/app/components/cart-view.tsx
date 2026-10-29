@@ -43,7 +43,7 @@ import {
 } from '@orderloop/ui/alert-dialog';
 import { Badge } from '@orderloop/ui/badge';
 import { Button } from '@orderloop/ui/button';
-import { Field, FieldLabel } from '@orderloop/ui/field';
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import {
   Item,
@@ -54,10 +54,11 @@ import {
   ItemTitle,
 } from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
+import { Spinner } from '@orderloop/ui/spinner';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useAgent } from 'agents/react';
-import { Clock, FileText } from 'lucide-react';
+import { CircleAlert, Clock, FileText } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -311,9 +312,10 @@ export function CartView({
         <div className="grid min-w-0 content-start gap-4">
           {cart.external && !final ? <SessionEnds cart={cart} guest={guest} /> : null}
           {error ? (
-            <p role="alert" className="rounded-lg border border-bad/40 px-3 py-2 text-bad text-sm">
-              {error}
-            </p>
+            <Alert variant="destructive">
+              <CircleAlert aria-hidden="true" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
           ) : null}
           <Section
             title="Lines"
@@ -1285,30 +1287,32 @@ function ShipTo({
           <legend className="caption mb-1.5">Shipping option</legend>
           <div className="grid gap-2">
             {quote.shippingOptions.map((o) => (
-              <label
+              <FieldLabel
                 key={o.id}
-                className="flex cursor-pointer items-start gap-2.5 rounded-lg border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:disabled]:cursor-default"
+                className="cursor-pointer has-[:checked]:border-primary has-[:checked]:bg-secondary has-[:disabled]:cursor-default"
               >
-                <input
-                  type="radio"
-                  name="shipping-option"
-                  value={o.id}
-                  checked={selected === o.id}
-                  onChange={() => void onOption(o.id)}
-                  className="mt-0.5"
-                />
-                <span className="grow">
-                  <span className="font-medium">{o.title}</span>
-                  <span className="block text-muted-foreground text-xs">
-                    {o.carrier} ·{' '}
-                    {o.minDays === o.maxDays ? o.minDays : `${o.minDays}–${o.maxDays}`}{' '}
-                    {o.maxDays === 1 ? 'day' : 'days'}
+                <Field orientation="horizontal" className="items-start gap-2.5 p-3!">
+                  <input
+                    type="radio"
+                    name="shipping-option"
+                    value={o.id}
+                    checked={selected === o.id}
+                    onChange={() => void onOption(o.id)}
+                    className="mt-0.5"
+                  />
+                  <FieldContent>
+                    <FieldTitle>{o.title}</FieldTitle>
+                    <FieldDescription className="text-xs">
+                      {o.carrier} ·{' '}
+                      {o.minDays === o.maxDays ? o.minDays : `${o.minDays}–${o.maxDays}`}{' '}
+                      {o.maxDays === 1 ? 'day' : 'days'}
+                    </FieldDescription>
+                  </FieldContent>
+                  <span className="text-sm tabular-nums">
+                    {o.free || o.amount === 0 ? 'Free' : money(o.amount, currency)}
                   </span>
-                </span>
-                <span className="tabular-nums">
-                  {o.free || o.amount === 0 ? 'Free' : money(o.amount, currency)}
-                </span>
-              </label>
+                </Field>
+              </FieldLabel>
             ))}
           </div>
         </fieldset>
@@ -1549,12 +1553,17 @@ function ReturnForm({ post }: { post: ReturnPost }) {
       {Object.entries(post.fields).map(([name, value]) => (
         <input key={name} type="hidden" name={name} value={value} />
       ))}
-      <p className="rounded-lg border px-3 py-2 text-sm">
-        Sending the cart back to your system…{' '}
-        <button type="submit" className="text-link hover:underline">
-          Continue
-        </button>
-      </p>
+      <Alert role="status">
+        <Spinner role="presentation" aria-hidden="true" />
+        <AlertDescription className="text-foreground">
+          <p>
+            Sending the cart back to your system…{' '}
+            <button type="submit" className="text-link hover:underline">
+              Continue
+            </button>
+          </p>
+        </AlertDescription>
+      </Alert>
     </form>
   );
 }
