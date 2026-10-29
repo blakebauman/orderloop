@@ -1,4 +1,6 @@
 import { Button } from '@orderloop/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
 import { useEffect, useRef, useState } from 'react';
 import { data, Form, redirect, useActionData, useLoaderData, useNavigation } from 'react-router';
@@ -71,61 +73,69 @@ export default function LoginTwoFactor() {
   }, [error]);
   return (
     <main className="grid min-h-dvh justify-items-center bg-background px-4 pt-[16vh]">
-      <Form method="post" className="h-fit w-full max-w-sm card p-6">
-        <Mark className="size-7" />
-        <h1 className="mt-4 font-semibold tracking-title text-2xl">Two-factor sign-in</h1>
-        <p className="mt-1 text-muted-foreground text-sm">
-          {recovery
-            ? `Enter one of your recovery codes for ${email}. Each works once.`
-            : `Enter the 6-digit code from your authenticator app for ${email}.`}
-        </p>
-        <label className="mt-5 block text-sm" htmlFor="code">
-          {recovery ? 'Recovery code' : 'Code'}
-        </label>
-        <input type="hidden" name="method" value={recovery ? 'recovery' : 'app'} />
-        <Input
-          ref={code}
-          key={recovery ? 'recovery' : 'app'}
-          id="code"
-          name="code"
-          required
-          autoFocus
-          inputMode={recovery ? 'text' : 'numeric'}
-          autoComplete={recovery ? 'off' : 'one-time-code'}
-          spellCheck={false}
-          className="mt-1 font-mono"
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'code-error' : undefined}
-        />
-        {error ? (
-          <p id="code-error" className="mt-2 text-destructive text-sm" role="alert">
-            {error}
-          </p>
-        ) : null}
-        <Button type="submit" className="mt-4 w-full" disabled={busy}>
-          {busy ? 'Verifying…' : 'Verify'}
-        </Button>
-        <div className="mt-3 space-y-1.5 text-muted-foreground text-xs">
-          <button
-            type="button"
-            className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
-            onClick={() => {
-              setCleared(result);
-              setRecovery((r) => !r);
-            }}
-          >
-            {recovery ? 'Use a code from your app instead' : 'Lost your phone? Use a recovery code'}
-          </button>
-          <p>No codes left? Ask an admin to reset your two-factor sign-in.</p>
-          <button
-            type="submit"
-            form="different-account"
-            className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
-          >
-            Use a different account
-          </button>
-        </div>
-      </Form>
+      <Card className="h-fit w-full max-w-sm">
+        <CardHeader>
+          <Mark className="size-7" />
+          <CardTitle className="mt-2">
+            <h1 className="font-semibold tracking-title text-2xl">Two-factor sign-in</h1>
+          </CardTitle>
+          <CardDescription>
+            {recovery
+              ? `Enter one of your recovery codes for ${email}. Each works once.`
+              : `Enter the 6-digit code from your authenticator app for ${email}.`}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form method="post">
+            <FieldGroup className="gap-4">
+              <Field>
+                <FieldLabel htmlFor="code">{recovery ? 'Recovery code' : 'Code'}</FieldLabel>
+                <input type="hidden" name="method" value={recovery ? 'recovery' : 'app'} />
+                <Input
+                  ref={code}
+                  key={recovery ? 'recovery' : 'app'}
+                  id="code"
+                  name="code"
+                  required
+                  autoFocus
+                  inputMode={recovery ? 'text' : 'numeric'}
+                  autoComplete={recovery ? 'off' : 'one-time-code'}
+                  spellCheck={false}
+                  className="font-mono"
+                  aria-invalid={error ? true : undefined}
+                  aria-describedby={error ? 'code-error' : undefined}
+                />
+                {error ? <FieldError id="code-error">{error}</FieldError> : null}
+              </Field>
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? 'Verifying…' : 'Verify'}
+              </Button>
+              <div className="space-y-1.5 text-muted-foreground text-xs">
+                <button
+                  type="button"
+                  className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
+                  onClick={() => {
+                    setCleared(result);
+                    setRecovery((r) => !r);
+                  }}
+                >
+                  {recovery
+                    ? 'Use a code from your app instead'
+                    : 'Lost your phone? Use a recovery code'}
+                </button>
+                <p>No codes left? Ask an admin to reset your two-factor sign-in.</p>
+                <button
+                  type="submit"
+                  form="different-account"
+                  className="-my-1 inline-flex min-h-8 items-center text-link hover:underline"
+                >
+                  Use a different account
+                </button>
+              </div>
+            </FieldGroup>
+          </Form>
+        </CardContent>
+      </Card>
       {/* Outside the code form: it signs out, which ends the challenge too. */}
       <form id="different-account" method="post" action="/logout" hidden />
     </main>

@@ -9,8 +9,33 @@ import {
   type OrderModel,
   TEMPLATES,
 } from '@orderloop/core';
+import { Badge } from '@orderloop/ui/badge';
 import { Button } from '@orderloop/ui/button';
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@orderloop/ui/card';
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import {
   NativeSelect,
   NativeSelectOptGroup,
@@ -18,6 +43,7 @@ import {
 } from '@orderloop/ui/native-select';
 import { Segmented, SegmentedItem } from '@orderloop/ui/segmented';
 import { Textarea } from '@orderloop/ui/textarea';
+import { PencilLine, Search, Workflow } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Form,
@@ -30,8 +56,7 @@ import {
 } from 'react-router';
 import { Ago } from '~/components/ago';
 import { FormSheet, useFormSheet } from '~/components/form-sheet';
-import { Field } from '~/components/inspector';
-import { PageHeader } from '~/components/page';
+import { Body, Empty, PageHeader } from '~/components/page';
 import { audit } from '~/lib/audit.server';
 import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
@@ -205,7 +230,7 @@ const EXAMPLES: Record<OrderModel, string> = {
     'A stock review: forecast demand for low SKUs, raise a PO with the supplier, and restock when the goods arrive.',
 };
 
-type Card = Awaited<ReturnType<typeof loader>>['flows'][number];
+type FlowRow = Awaited<ReturnType<typeof loader>>['flows'][number];
 
 export default function Flows() {
   const canOperate = useCan('operator');
@@ -221,6 +246,9 @@ export default function Flows() {
     nav.formMethod === 'POST' &&
     !['archive', 'restore', 'duplicate'].includes(String(nav.formData?.get('intent') ?? ''));
   const hintId = useId();
+  const nameId = useId();
+  const modelId = useId();
+  const promptId = useId();
   const alertRef = useRef<HTMLParagraphElement>(null);
   // A new flow redirects to its editor; a refusal keeps the sheet open with what was typed.
   const sheet = useFormSheet(data ?? undefined, () => false);
@@ -271,192 +299,238 @@ export default function Flows() {
         actions={
           canOperate && !archived ? (
             <FormSheet open={sheet.open} onOpenChange={sheet.onOpenChange} label="New flow">
-              <Form method="post" className="space-y-4" noValidate>
-                <Field label="Name" hint={start === 'generate' ? 'Optional' : undefined}>
-                  <Input
-                    name="name"
-                    placeholder="e.g. Weekend flash sale"
-                    className="h-8"
-                    required={start !== 'generate'}
-                    aria-invalid={formError?.field === 'name' || undefined}
-                  />
-                </Field>
-                <Field label="Commerce model">
-                  <NativeSelect
-                    name="model"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value as OrderModel)}
-                    wrapperClassName="w-full"
-                    className="h-8 w-full"
-                  >
-                    {(
-                      [
-                        ['Selling', SELLING],
-                        ['Buying', BUY_SIDE_MODELS],
-                      ] as const
-                    ).map(([group, models]) => (
-                      <NativeSelectOptGroup key={group} label={group}>
-                        {models.map((m: OrderModel) => (
-                          <NativeSelectOption key={m} value={m}>
-                            {ORDER_MODEL_LABELS[m]}
-                          </NativeSelectOption>
-                        ))}
-                      </NativeSelectOptGroup>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <fieldset aria-describedby={hintId}>
-                  <legend className="caption mb-1.5">Start from</legend>
-                  <Segmented
-                    name="start"
-                    aria-label="Start from"
-                    value={start}
-                    onValueChange={(v) => setStart(v as typeof start)}
-                    className="grid w-full"
-                  >
-                    {STARTS.map((o) => (
-                      <SegmentedItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SegmentedItem>
-                    ))}
-                  </Segmented>
-                  <p
-                    id={hintId}
-                    className="mt-1.5 text-muted-foreground text-xs"
-                    aria-live="polite"
-                  >
-                    {hint}
-                  </p>
-                </fieldset>
-                {start === 'generate' ? (
-                  <Field label="What should happen">
-                    <Textarea
-                      name="prompt"
-                      rows={5}
-                      className="text-base md:text-sm"
-                      placeholder={EXAMPLES[model]}
-                      aria-invalid={formError?.field === 'prompt' || undefined}
+              <Form method="post" noValidate>
+                <FieldGroup className="gap-5">
+                  <Field>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+                      {start === 'generate' ? (
+                        <span className="text-muted-foreground text-xs">Optional</span>
+                      ) : null}
+                    </div>
+                    <Input
+                      id={nameId}
+                      name="name"
+                      placeholder="e.g. Weekend flash sale"
+                      className="h-8"
+                      required={start !== 'generate'}
+                      aria-invalid={formError?.field === 'name' || undefined}
                     />
                   </Field>
-                ) : null}
-                {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
-                <input type="hidden" name="intent" value={start === 'generate' ? 'generate' : ''} />
-                <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
-                {formError ? (
-                  <p
-                    ref={alertRef}
-                    tabIndex={-1}
-                    className="text-bad text-sm outline-none"
-                    role="alert"
-                  >
-                    {formError.error}
+                  <Field>
+                    <FieldLabel htmlFor={modelId}>Commerce model</FieldLabel>
+                    <NativeSelect
+                      id={modelId}
+                      name="model"
+                      value={model}
+                      onChange={(e) => setModel(e.target.value as OrderModel)}
+                      wrapperClassName="w-full"
+                      className="h-8 w-full"
+                    >
+                      {(
+                        [
+                          ['Selling', SELLING],
+                          ['Buying', BUY_SIDE_MODELS],
+                        ] as const
+                      ).map(([group, models]) => (
+                        <NativeSelectOptGroup key={group} label={group}>
+                          {models.map((m: OrderModel) => (
+                            <NativeSelectOption key={m} value={m}>
+                              {ORDER_MODEL_LABELS[m]}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelectOptGroup>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <FieldSet aria-describedby={hintId} className="gap-0">
+                    <FieldLegend variant="label" className="mb-2">
+                      Start from
+                    </FieldLegend>
+                    <Segmented
+                      name="start"
+                      aria-label="Start from"
+                      value={start}
+                      onValueChange={(v) => setStart(v as typeof start)}
+                      className="grid w-full"
+                    >
+                      {STARTS.map((o) => (
+                        <SegmentedItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SegmentedItem>
+                      ))}
+                    </Segmented>
+                    <FieldDescription
+                      id={hintId}
+                      className="mt-2 text-xs last:mt-2"
+                      aria-live="polite"
+                    >
+                      {hint}
+                    </FieldDescription>
+                  </FieldSet>
+                  {start === 'generate' ? (
+                    <Field>
+                      <FieldLabel htmlFor={promptId}>What should happen</FieldLabel>
+                      <Textarea
+                        id={promptId}
+                        name="prompt"
+                        rows={5}
+                        className="text-base md:text-sm"
+                        placeholder={EXAMPLES[model]}
+                        aria-invalid={formError?.field === 'prompt' || undefined}
+                      />
+                    </Field>
+                  ) : null}
+                  {/* The action reads `intent` for AI drafts and `from` for template or blank. */}
+                  <input
+                    type="hidden"
+                    name="intent"
+                    value={start === 'generate' ? 'generate' : ''}
+                  />
+                  <input type="hidden" name="from" value={start === 'generate' ? '' : start} />
+                  {formError ? (
+                    <p
+                      ref={alertRef}
+                      tabIndex={-1}
+                      className="text-bad text-sm outline-none"
+                      role="alert"
+                    >
+                      {formError.error}
+                    </p>
+                  ) : null}
+                  <Button type="submit" size="sm" className="self-start" disabled={creating}>
+                    {start === 'generate'
+                      ? creating
+                        ? 'Drafting…'
+                        : 'Draft the flow'
+                      : creating
+                        ? 'Creating…'
+                        : 'Create flow'}
+                  </Button>
+                  <p className="sr-only" aria-live="polite">
+                    {creating
+                      ? start === 'generate'
+                        ? 'Drafting the flow.'
+                        : 'Creating the flow.'
+                      : ''}
                   </p>
-                ) : null}
-                <Button type="submit" size="sm" disabled={creating}>
-                  {start === 'generate'
-                    ? creating
-                      ? 'Drafting…'
-                      : 'Draft the flow'
-                    : creating
-                      ? 'Creating…'
-                      : 'Create flow'}
-                </Button>
-                <p className="sr-only" aria-live="polite">
-                  {creating
-                    ? start === 'generate'
-                      ? 'Drafting the flow.'
-                      : 'Creating the flow.'
-                    : ''}
-                </p>
-                <p className="text-muted-foreground text-xs">
-                  A new flow gets no inbound orders until it is published and routed to; you can
-                  always start orders on it by hand.
-                </p>
+                  <FieldDescription className="text-xs">
+                    A new flow gets no inbound orders until it is published and routed to; you can
+                    always start orders on it by hand.
+                  </FieldDescription>
+                </FieldGroup>
               </Form>
             </FormSheet>
           ) : null
         }
       />
-      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
-        <div className="min-w-0">
-          <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+      <Body>
+        {/* The toolbar (release-catalog's): the filter, and the way to the archived drafts. */}
+        <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="relative w-full sm:w-80">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder="Filter by name, description or order type"
               aria-label="Filter flows"
-              className="h-8 w-full sm:w-80"
+              className="h-8 w-full pl-9"
             />
-            {archived ? (
-              <button
-                type="button"
-                className="text-link text-sm hover:underline"
-                onClick={() => setParams({})}
-              >
-                Back to flows in use
-              </button>
-            ) : archivedCount ? (
-              <button
-                type="button"
-                className="text-link text-sm hover:underline"
-                onClick={() => setParams({ archived: '1' })}
-              >
-                Archived drafts ({count(archivedCount)})
-              </button>
-            ) : null}
           </div>
           {archived ? (
-            <p className="mb-4 text-muted-foreground text-sm">
-              Drafts that were never published, set aside. Restore one to edit it again.
-            </p>
+            <button
+              type="button"
+              className="text-link text-sm hover:underline"
+              onClick={() => setParams({})}
+            >
+              Back to flows in use
+            </button>
+          ) : archivedCount ? (
+            <button
+              type="button"
+              className="text-link text-sm hover:underline"
+              onClick={() => setParams({ archived: '1' })}
+            >
+              Archived drafts ({count(archivedCount)})
+            </button>
           ) : null}
+        </div>
+        {archived ? (
+          <p className="mb-4 text-muted-foreground text-sm">
+            Drafts that were never published, set aside. Restore one to edit it again.
+          </p>
+        ) : null}
 
-          {groups.length ? (
-            <div className="space-y-6">
-              {groups.map((s) => (
-                <section key={s.side} aria-labelledby={`side-${s.side}`}>
-                  <h2 id={`side-${s.side}`} className="caption mb-2 uppercase tracking-wide">
-                    {s.side}
-                  </h2>
-                  <div className="grid items-start gap-x-3 gap-y-5 md:grid-cols-2">
-                    {s.models.map((g) => (
-                      <section key={g.model} aria-labelledby={`model-${g.model}`}>
-                        <h3 id={`model-${g.model}`} className="section-title mb-2">
-                          {ORDER_MODEL_LABELS[g.model]}
-                        </h3>
-                        <ul className="space-y-3">
-                          {g.items.map((f) => (
-                            <FlowCard
-                              key={f.id}
-                              f={f}
-                              canOperate={canOperate}
-                              error={data?.flowId === f.id ? data.error : undefined}
-                            />
-                          ))}
-                        </ul>
-                      </section>
-                    ))}
-                  </div>
-                </section>
-              ))}
-            </div>
-          ) : (
-            <p className="card px-4 py-8 text-center text-muted-foreground text-sm">
+        {groups.length ? (
+          <div className="space-y-8">
+            {groups.map((s) => (
+              <section key={s.side} aria-labelledby={`side-${s.side}`}>
+                <h2 id={`side-${s.side}`} className="caption mb-3 uppercase tracking-wide">
+                  {s.side}
+                </h2>
+                {/* A card per order model: its template in the header, then its flows. */}
+                <div className="grid items-start gap-4 md:grid-cols-2">
+                  {s.models.map((g) => (
+                    <section key={g.model} aria-labelledby={`model-${g.model}`} className="min-w-0">
+                      <Card className="gap-4 [--card-spacing:--spacing(5)]">
+                        <CardHeader>
+                          <CardTitle className="section-title">
+                            <h3 id={`model-${g.model}`}>{ORDER_MODEL_LABELS[g.model]}</h3>
+                          </CardTitle>
+                          <CardDescription>
+                            Template: {templates[g.model].name}, {templates[g.model].steps} steps
+                          </CardDescription>
+                          <CardAction className="self-center">
+                            <Badge variant="secondary" className="tabular">
+                              {g.items.length} {g.items.length === 1 ? 'flow' : 'flows'}
+                            </Badge>
+                          </CardAction>
+                        </CardHeader>
+                        <CardContent>
+                          <ul className="flex flex-col gap-2">
+                            {g.items.map((f) => (
+                              <FlowItem
+                                key={f.id}
+                                f={f}
+                                canOperate={canOperate}
+                                error={data?.flowId === f.id ? data.error : undefined}
+                              />
+                            ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    </section>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <Card>
+            <Empty icon={q ? undefined : <Workflow aria-hidden="true" />}>
               {q
                 ? `No flow matches “${filter.trim()}”.`
                 : archived
                   ? 'No archived drafts.'
                   : 'No flows yet.'}
-            </p>
-          )}
-        </div>
-      </div>
+            </Empty>
+          </Card>
+        )}
+      </Body>
     </>
   );
 }
 
-function FlowCard({ f, canOperate, error }: { f: Card; canOperate: boolean; error?: string }) {
+/**
+ * One flow, as a muted Item (the release-catalog row): its version as the tile, then its name (the
+ * link, stretched over the Item), state, description and what it receives and runs, and its actions
+ * in the footer, above the link.
+ */
+function FlowItem({ f, canOperate, error }: { f: FlowRow; canOperate: boolean; error?: string }) {
   const titleId = useId();
   const running = Object.entries(f.running).map(([v, n]) => [Number(v), n] as const);
   const total = running.reduce((s, [, n]) => s + n, 0);
@@ -469,110 +543,123 @@ function FlowCard({ f, canOperate, error }: { f: Card; canOperate: boolean; erro
     `${count(f.summary.steps)} steps`,
   ].filter(Boolean);
   return (
-    <li
-      aria-labelledby={titleId}
-      className="relative flex min-w-0 flex-col card p-4 transition-colors hover:border-foreground/30"
-    >
-      <h4 id={titleId} className="font-medium">
-        {/* The whole card opens the flow; the link's name is just the flow's. */}
-        <Link
-          to={`/flows/${f.id}`}
-          className="after:absolute after:inset-0 after:rounded-md hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
-        >
-          {f.name}
-        </Link>
-      </h4>
-      <p className="mt-0.5 text-xs">
-        {f.publishedVersion ? (
-          <>
-            <span className="font-medium text-foreground">Live v{f.publishedVersion}</span>
-            {f.dirty ? <span className="text-wait"> · unpublished changes</span> : null}
-            {f.publishedAt ? (
-              <span className="text-muted-foreground">
-                {' '}
-                · published <Ago ms={f.publishedAt} />
-              </span>
-            ) : null}
-          </>
-        ) : (
-          <span className="font-medium text-muted-foreground">
-            Draft, never published · edited <Ago ms={f.updatedAt} />
-          </span>
-        )}
-      </p>
-      <p className="mt-2 line-clamp-2 text-muted-foreground text-sm leading-relaxed">
-        {f.description || 'No description yet.'}
-      </p>
-      <dl className="mt-3 space-y-0.5 text-xs">
-        <div className="flex gap-1.5">
-          <dt className="shrink-0 text-muted-foreground">Receives</dt>
-          <dd className={f.receives.lines.length ? 'text-foreground' : 'text-muted-foreground'}>
-            {f.receives.lines.length
-              ? f.receives.lines.join(' · ')
-              : 'No inbound orders. Start them by hand, or route orders to it.'}
-            {f.receives.lines.length && !f.publishedVersion ? (
-              <span className="text-bad"> Not published, so those orders are refused.</span>
-            ) : null}
-          </dd>
-        </div>
-        <div className="flex gap-1.5">
-          <dt className="shrink-0 text-muted-foreground">Running</dt>
-          <dd>
-            {total ? (
-              <Link
-                to={`/orders?flow=${encodeURIComponent(f.id)}`}
-                className="relative z-10 text-link hover:underline"
-              >
-                {count(total)} {total === 1 ? 'order' : 'orders'}
-                {older ? ` (${count(older)} on older versions)` : ''}
-              </Link>
+    <Item asChild variant="muted" size="sm" className="relative items-start hover:bg-muted">
+      <li aria-labelledby={titleId}>
+        {/* The live version at a glance; the line under the name says it in words. */}
+        <ItemMedia aria-hidden="true">
+          <span className="flex size-11 items-center justify-center rounded-xl border bg-card font-semibold text-sm tabular">
+            {f.publishedVersion ? (
+              `v${f.publishedVersion}`
             ) : (
-              <span className="text-muted-foreground">None</span>
+              <PencilLine className="size-4 text-muted-foreground" />
             )}
-          </dd>
-        </div>
-        <div className="flex gap-1.5">
-          <dt className="shrink-0 text-muted-foreground">Steps</dt>
-          <dd className="text-muted-foreground">{steps.join(' · ')}</dd>
-        </div>
-      </dl>
-      {canOperate ? (
-        <div className="relative z-10 mt-3 flex flex-wrap gap-2 border-t pt-3">
-          <Form method="post">
-            <input type="hidden" name="flowId" value={f.id} />
-            <Button
-              type="submit"
-              name="intent"
-              value="duplicate"
-              size="xs"
-              variant="ghost"
-              aria-label={`Duplicate ${f.name}`}
-            >
-              Duplicate
-            </Button>
-          </Form>
-          {!f.publishedVersion ? (
+          </span>
+        </ItemMedia>
+        <ItemContent className="min-w-0">
+          <ItemTitle className="w-full">
+            <h4 id={titleId} className="min-w-0 truncate">
+              {/* The whole item opens the flow; the link's name is just the flow's. */}
+              <Link
+                to={`/flows/${f.id}`}
+                className="after:absolute after:inset-0 after:rounded-2xl hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-[var(--ring)]"
+              >
+                {f.name}
+              </Link>
+            </h4>
+          </ItemTitle>
+          <p className="text-xs">
+            {f.publishedVersion ? (
+              <>
+                <span className="font-medium text-foreground">Live v{f.publishedVersion}</span>
+                {f.dirty ? <span className="text-wait"> · unpublished changes</span> : null}
+                {f.publishedAt ? (
+                  <span className="text-muted-foreground">
+                    {' '}
+                    · published <Ago ms={f.publishedAt} />
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="font-medium text-muted-foreground">
+                Draft, never published · edited <Ago ms={f.updatedAt} />
+              </span>
+            )}
+          </p>
+          <ItemDescription className="mt-1 leading-relaxed">
+            {f.description || 'No description yet.'}
+          </ItemDescription>
+          <dl className="mt-2 space-y-0.5 text-xs">
+            <div className="flex gap-1.5">
+              <dt className="shrink-0 text-muted-foreground">Receives</dt>
+              <dd className={f.receives.lines.length ? 'text-foreground' : 'text-muted-foreground'}>
+                {f.receives.lines.length
+                  ? f.receives.lines.join(' · ')
+                  : 'No inbound orders. Start them by hand, or route orders to it.'}
+                {f.receives.lines.length && !f.publishedVersion ? (
+                  <span className="text-bad"> Not published, so those orders are refused.</span>
+                ) : null}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt className="shrink-0 text-muted-foreground">Running</dt>
+              <dd>
+                {total ? (
+                  <Link
+                    to={`/orders?flow=${encodeURIComponent(f.id)}`}
+                    className="relative z-10 text-link hover:underline"
+                  >
+                    {count(total)} {total === 1 ? 'order' : 'orders'}
+                    {older ? ` (${count(older)} on older versions)` : ''}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">None</span>
+                )}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt className="shrink-0 text-muted-foreground">Steps</dt>
+              <dd className="text-muted-foreground">{steps.join(' · ')}</dd>
+            </div>
+          </dl>
+        </ItemContent>
+        {canOperate ? (
+          <ItemFooter className="relative z-10 justify-start border-t pt-2">
             <Form method="post">
               <input type="hidden" name="flowId" value={f.id} />
               <Button
                 type="submit"
                 name="intent"
-                value={f.archivedAt ? 'restore' : 'archive'}
+                value="duplicate"
                 size="xs"
                 variant="ghost"
-                aria-label={`${f.archivedAt ? 'Restore' : 'Archive'} ${f.name}`}
+                aria-label={`Duplicate ${f.name}`}
               >
-                {f.archivedAt ? 'Restore' : 'Archive'}
+                Duplicate
               </Button>
             </Form>
-          ) : null}
-        </div>
-      ) : null}
-      {error ? (
-        <p className="relative z-10 mt-2 text-bad text-xs" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </li>
+            {!f.publishedVersion ? (
+              <Form method="post">
+                <input type="hidden" name="flowId" value={f.id} />
+                <Button
+                  type="submit"
+                  name="intent"
+                  value={f.archivedAt ? 'restore' : 'archive'}
+                  size="xs"
+                  variant="ghost"
+                  aria-label={`${f.archivedAt ? 'Restore' : 'Archive'} ${f.name}`}
+                >
+                  {f.archivedAt ? 'Restore' : 'Archive'}
+                </Button>
+              </Form>
+            ) : null}
+          </ItemFooter>
+        ) : null}
+        {error ? (
+          <p className="relative z-10 basis-full text-bad text-xs" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </li>
+    </Item>
   );
 }

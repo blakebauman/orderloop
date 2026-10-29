@@ -1,6 +1,6 @@
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { X } from 'lucide-react';
+import { ScrollText, X } from 'lucide-react';
 import { Form, Link, useLoaderData, useSubmit } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
@@ -45,35 +45,33 @@ export default function Audit() {
         subtitle="Sign-ins, team and token changes, and what was done to orders, flows and webhooks, newest first. Kept 400 days unless your contract sets another period."
         crumbs={<Link to="/team">Team</Link>}
       />
-      <div className="mx-auto max-w-page space-y-4 px-4 pb-10 sm:px-6">
-        <Form method="get" className="flex items-center gap-2">
-          <label htmlFor="type" className="text-muted-foreground text-sm">
-            Show
-          </label>
-          <NativeSelect
-            id="type"
-            name="type"
-            defaultValue={group}
-            className="h-8"
-            onChange={(e) => submit(e.currentTarget.form)}
-          >
-            <NativeSelectOption value="">Everything</NativeSelectOption>
-            {Object.entries(AUDIT_GROUPS).map(([k, label]) => (
-              <NativeSelectOption key={k} value={k}>
-                {label}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          {before ? (
-            <Link
-              to={group ? `/audit?type=${group}` : '/audit'}
-              className="text-link text-sm hover:underline"
-            >
-              Newest
-            </Link>
-          ) : null}
-        </Form>
-        <Section title="Events" flush>
+      <div className="mx-auto max-w-page px-4 pb-10 sm:px-6">
+        {/* The filter heads the table it filters; the pages are at its foot. */}
+        <Section
+          title="Events"
+          flush
+          actions={
+            <Form method="get" className="flex items-center gap-2">
+              <label htmlFor="type" className="text-muted-foreground text-sm">
+                Show
+              </label>
+              <NativeSelect
+                id="type"
+                name="type"
+                defaultValue={group}
+                className="h-8"
+                onChange={(e) => submit(e.currentTarget.form)}
+              >
+                <NativeSelectOption value="">Everything</NativeSelectOption>
+                {Object.entries(AUDIT_GROUPS).map(([k, label]) => (
+                  <NativeSelectOption key={k} value={k}>
+                    {label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </Form>
+          }
+        >
           {events.length ? (
             <Table stack="cards" sticky caption="Events">
               <TableHead>
@@ -116,21 +114,35 @@ export default function Audit() {
               </TableBody>
             </Table>
           ) : (
-            <Empty>
+            <Empty icon={<ScrollText aria-hidden="true" />}>
               {group
                 ? 'Nothing of this kind yet.'
                 : 'Sign-ins, changes to people and tokens, and refused API calls appear here as they happen, newest first.'}
             </Empty>
           )}
+          {before || (more && older) ? (
+            <div className="flex items-center justify-between gap-3 border-t px-4 py-3 text-sm">
+              {before ? (
+                <Link
+                  to={group ? `/audit?type=${group}` : '/audit'}
+                  className="text-link hover:underline"
+                >
+                  Newest
+                </Link>
+              ) : (
+                <span />
+              )}
+              {more && older ? (
+                <Link
+                  to={`/audit?${new URLSearchParams({ ...(group ? { type: group } : {}), before: String(older) })}`}
+                  className="text-link hover:underline"
+                >
+                  Older
+                </Link>
+              ) : null}
+            </div>
+          ) : null}
         </Section>
-        {more && older ? (
-          <Link
-            to={`/audit?${new URLSearchParams({ ...(group ? { type: group } : {}), before: String(older) })}`}
-            className="text-link text-sm hover:underline"
-          >
-            Older
-          </Link>
-        ) : null}
       </div>
     </>
   );

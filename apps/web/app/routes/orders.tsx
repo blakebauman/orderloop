@@ -8,11 +8,12 @@ import {
 } from '@orderloop/core';
 import { Button } from '@orderloop/ui/button';
 import { Input } from '@orderloop/ui/input';
+import { Kbd } from '@orderloop/ui/kbd';
 import { cn } from '@orderloop/ui/lib/utils';
 import { NativeSelect, NativeSelectOption } from '@orderloop/ui/native-select';
 import { Sheet, SheetClose, SheetContent, SheetTitle, SheetTrigger } from '@orderloop/ui/sheet';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
-import { ListFilter } from 'lucide-react';
+import { ListFilter, ReceiptText, Search } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import {
   Form,
@@ -24,7 +25,7 @@ import {
   useSubmit,
 } from 'react-router';
 import { Ago, WaitingAt } from '~/components/ago';
-import { Empty, PageHeader } from '~/components/page';
+import { Empty, PageHeader, Section } from '~/components/page';
 import { StatusBadge } from '~/components/status';
 import { requireUser } from '~/lib/auth.server';
 import { decodeCursor, encodeCursor } from '~/lib/cursor';
@@ -231,8 +232,12 @@ export default function Orders() {
         >
           {/* Set from a flow's card; kept while the other filters change. */}
           {flow ? <input type="hidden" name="flow" value={flow.id} /> : null}
-          <FilterFields sort={sort} />
-          <div className="relative min-w-0 flex-1 md:w-72 md:flex-none">
+          {/* Search leads, as in the preview cards' catalog toolbar; the filters follow it. */}
+          <div className="relative min-w-0 flex-1 md:min-w-64">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
               ref={search}
               name="q"
@@ -245,15 +250,16 @@ export default function Orders() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              className="h-8 pr-8 touch:pr-3"
+              className="h-8 pr-8 pl-8 touch:pr-3"
             />
-            <span
+            <Kbd
               aria-hidden="true"
-              className="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 rounded-sm bg-muted px-1 font-sans text-2xs text-muted-foreground touch:hidden"
+              className="absolute top-1/2 right-2 -translate-y-1/2 touch:hidden"
             >
               /
-            </span>
+            </Kbd>
           </div>
+          <FilterFields sort={sort} />
           <AttentionToggle checked={attention} className="max-md:hidden" />
           {/* A phone keeps the search and puts the rest in a sheet, so the orders start on the
               first screen. The sheet is outside the form in the DOM: its change is applied over the
@@ -314,67 +320,75 @@ export default function Orders() {
               </div>
             </SheetContent>
           </Sheet>
-          {filtered ? (
-            <Button asChild variant="ghost" size="sm" className="max-md:hidden">
-              <Link to={sort === 'created' ? '/orders' : `/orders?sort=${sort}`}>
-                Clear filters
-              </Link>
-            </Button>
-          ) : null}
         </Form>
-        {flow ? (
-          <p className="-mt-2 mb-3 text-muted-foreground text-xs">
-            On the{' '}
-            <Link to={`/flows/${flow.id}`} className="text-link hover:underline">
-              {flow.name}
-            </Link>{' '}
-            flow, any version.{' '}
-            <Link
-              to={(() => {
-                const next = new URLSearchParams(params);
-                next.delete('flow');
-                const s = next.toString();
-                return s ? `?${s}` : '/orders';
-              })()}
-              className="text-link hover:underline"
-            >
-              All flows
-            </Link>
-          </p>
-        ) : null}
-        {params.get('step') || params.get('within') ? (
-          <p className="-mt-2 mb-3 text-muted-foreground text-xs">
-            {params.get('step') ? (
-              <>
-                At the step{' '}
-                <span className="font-medium text-foreground">{params.get('step')}</span>
-                {params.get('within') ? `, ${WITHIN_LABEL[params.get('within') ?? '']}. ` : '. '}
-              </>
-            ) : (
-              `${(WITHIN_LABEL[params.get('within') ?? ''] ?? '').replace(/^u/, 'U')}. `
-            )}
-            <Link
-              to={(() => {
-                const next = new URLSearchParams(params);
-                next.delete('step');
-                next.delete('within');
-                const s = next.toString();
-                return s ? `?${s}` : '/orders';
-              })()}
-              className="text-link hover:underline"
-            >
-              Any step, any time
-            </Link>
-          </p>
-        ) : null}
-        {attention ? (
-          <p className="-mt-2 mb-3 text-muted-foreground text-xs">
-            Failed or rolled back, or waiting on a person to decide.
-          </p>
-        ) : null}
-
-        {n ? (
-          <div className="card relative overflow-clip">
+        <Section
+          title={attention ? 'Needs attention' : filtered ? 'Matching orders' : 'All orders'}
+          description={
+            flow || params.get('step') || params.get('within') || attention ? (
+              <div className="space-y-0.5">
+                {flow ? (
+                  <p>
+                    On the{' '}
+                    <Link to={`/flows/${flow.id}`} className="text-link hover:underline">
+                      {flow.name}
+                    </Link>{' '}
+                    flow, any version.{' '}
+                    <Link
+                      to={(() => {
+                        const next = new URLSearchParams(params);
+                        next.delete('flow');
+                        const s = next.toString();
+                        return s ? `?${s}` : '/orders';
+                      })()}
+                      className="text-link hover:underline"
+                    >
+                      All flows
+                    </Link>
+                  </p>
+                ) : null}
+                {params.get('step') || params.get('within') ? (
+                  <p>
+                    {params.get('step') ? (
+                      <>
+                        At the step{' '}
+                        <span className="font-medium text-foreground">{params.get('step')}</span>
+                        {params.get('within')
+                          ? `, ${WITHIN_LABEL[params.get('within') ?? '']}. `
+                          : '. '}
+                      </>
+                    ) : (
+                      `${(WITHIN_LABEL[params.get('within') ?? ''] ?? '').replace(/^u/, 'U')}. `
+                    )}
+                    <Link
+                      to={(() => {
+                        const next = new URLSearchParams(params);
+                        next.delete('step');
+                        next.delete('within');
+                        const s = next.toString();
+                        return s ? `?${s}` : '/orders';
+                      })()}
+                      className="text-link hover:underline"
+                    >
+                      Any step, any time
+                    </Link>
+                  </p>
+                ) : null}
+                {attention ? <p>Failed or rolled back, or waiting on a person to decide.</p> : null}
+              </div>
+            ) : undefined
+          }
+          actions={
+            filtered ? (
+              <Button asChild variant="outline" size="sm" className="hit-area max-md:hidden">
+                <Link to={sort === 'created' ? '/orders' : `/orders?sort=${sort}`}>
+                  Clear filters
+                </Link>
+              </Button>
+            ) : null
+          }
+          flush
+        >
+          {n ? (
             <Table stack="rows" sticky caption="Orders">
               <TableHead>
                 <Tr>
@@ -468,15 +482,15 @@ export default function Orders() {
                 })}
               </TableBody>
             </Table>
-          </div>
-        ) : (
-          <div className="card overflow-hidden">
+          ) : (
             <Empty
+              icon={filtered ? undefined : <ReceiptText aria-hidden="true" />}
+              title={filtered ? undefined : 'No orders yet'}
               action={
                 filtered ? null : (
-                  <Link to="/orders/new" className="text-link text-sm hover:underline">
-                    Start an order
-                  </Link>
+                  <Button size="sm" className="hit-area" asChild>
+                    <Link to="/orders/new">Start an order</Link>
+                  </Button>
                 )
               }
             >
@@ -493,38 +507,37 @@ export default function Orders() {
               ) : filtered ? (
                 'No orders match these filters.'
               ) : (
-                'No orders yet.'
+                'Orders from the API, your storefronts, email and this console appear here.'
               )}
             </Empty>
-          </div>
-        )}
+          )}
+          {older || paged ? (
+            <nav aria-label="Pages" className="flex justify-between border-t px-5 py-3 text-sm">
+              {paged ? (
+                <Link to={pageLink(params, null)} className="hit-area text-link hover:underline">
+                  Newest orders
+                </Link>
+              ) : (
+                <span />
+              )}
+              {older ? (
+                <Link to={pageLink(params, older)} className="hit-area text-link hover:underline">
+                  Older orders
+                </Link>
+              ) : null}
+            </nav>
+          ) : capped ? (
+            <p className="border-t px-5 py-3 text-muted-foreground text-xs">
+              Showing the first {count(PAGE)}. Narrow the filters, or sort newest first to page
+              through all of them.
+            </p>
+          ) : null}
+        </Section>
 
         {n ? (
           <p className="mt-3 hidden text-muted-foreground text-xs fine:block">
-            Keyboard: <kbd className="font-mono">/</kbd> searches,{' '}
-            <kbd className="font-mono">J</kbd> and <kbd className="font-mono">K</kbd> move between
-            orders, <kbd className="font-mono">Enter</kbd> opens one.
-          </p>
-        ) : null}
-        {older || paged ? (
-          <nav aria-label="Pages" className="mt-3 flex justify-between text-sm">
-            {paged ? (
-              <Link to={pageLink(params, null)} className="text-link hover:underline">
-                Newest orders
-              </Link>
-            ) : (
-              <span />
-            )}
-            {older ? (
-              <Link to={pageLink(params, older)} className="text-link hover:underline">
-                Older orders
-              </Link>
-            ) : null}
-          </nav>
-        ) : capped ? (
-          <p className="mt-3 text-muted-foreground text-xs">
-            Showing the first {count(PAGE)}. Narrow the filters, or sort newest first to page
-            through all of them.
+            Keyboard: <Kbd>/</Kbd> searches, <Kbd>J</Kbd> and <Kbd>K</Kbd> move between orders,{' '}
+            <Kbd>Enter</Kbd> opens one.
           </p>
         ) : null}
       </div>

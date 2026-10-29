@@ -1,3 +1,4 @@
+import { Badge } from '@orderloop/ui/badge';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Ban, Undo2, X } from 'lucide-react';
 import { outcomeLabel, statusColor, statusLabel } from '~/lib/format';
@@ -36,15 +37,17 @@ function Stamp({
 }) {
   const Mark = ended === 'undone' ? Undo2 : ended === 'declined' ? Ban : X;
   return (
-    <span
+    <Badge
+      variant="outline"
       className={cn(
-        // A step that changes state cross-fades to its new colour rather than snapping.
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 font-medium text-xs transition-[color,background-color,border-color] duration-(--motion-move)',
-        ended && 'border py-px',
+        // Maia's Badge, in the status colour. A step that changes state cross-fades to its new
+        // colour rather than snapping.
+        'gap-1.5 transition-[color,background-color,border-color] duration-(--motion-move)',
+        !ended && 'border-transparent',
       )}
       style={
         ended
-          ? { color, borderColor: color }
+          ? { color, borderColor: color, background: 'transparent' }
           : { color, background: `color-mix(in oklch, ${color} 11%, transparent)` }
       }
     >
@@ -61,7 +64,7 @@ function Stamp({
         />
       )}
       {label}
-    </span>
+    </Badge>
   );
 }
 

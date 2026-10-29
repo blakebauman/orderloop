@@ -332,14 +332,21 @@ Every data table is `Table` from `packages/ui/src/table.tsx`, with its parts (`T
   picked; it is on the canvas, so it works in the review-only editor and the order page's Graph
   tab. React Flow's credit stays (its authors ask that only subscribers remove it), at caption
   size.
-- **Overview on a phone:** "Needs a decision" (or "No decisions waiting") comes first, above the
-  status strip (the two grids below md are `contents`, and the panel is ordered first). Each strip
-  group is one line of figures, label then count, 44px tall, scrolling sideways if it doesn't fit;
-  md and up keep the tiles.
+- **Overview** (`routes/dashboard.tsx`), composed from shadcn's preview-02 cards: open work as two
+  figure cards (label at the top, the count at the foot; the whole card opens those orders), the
+  last day's endings as one card of five figures, then cards with a header (title, a one-line
+  description, an outline action) over Items: decisions as muted Items, waiting steps as muted
+  Item chips along each flow, endings and recent orders as quiet Item rows, and an Empty with an
+  icon when there are no orders. On a phone "Needs a decision" (or "No decisions waiting") comes
+  first, above the figures (the two grids below md are `contents`, and that card is ordered
+  first); the endings are one line, label then count, 44px tall, scrolling sideways if it doesn't
+  fit.
 - **Orders list on a phone:** the bar keeps the search and a Filter button with the count of
   filters set; model, channel, status, sort and Needs attention move to a bottom sheet. They are the
   same URL parameters as the bar's from md.
-- **Order page:** at lg the graph sits beside Actions, Activity, Details and Node. Below lg the
+- **Order page:** its panels are cards: Actions leads with what waits (muted Items with their
+  controls) before the rollback; Activity is a Timeline card of quiet Items; Details keeps its
+  record tables in flush cards. At lg the graph sits beside Actions, Activity, Details and Node. Below lg the
   graph is a tab of its own, so each view has the screen and the page is the one scroll region.
   Its header's title wraps; the totals ("N lines · tax") stay on one line and, with Ask and Share,
   wrap below the title as a group. Below md Cancel order moves into a ghost `⋯` menu ("More order
@@ -436,9 +443,31 @@ for code and data blocks only.
   over an `input` fill at 30%. Focus: the `ring` edge and halo. Invalid: the destructive edge.
 - **Segmented** (`segmented.tsx`): a radio group drawn as a muted pill track; the chosen segment
   is raised on paper. Arrow keys move the choice.
-- **Card and tile** (`card`, `tile` in app.css): the panel and the step inside it. `Section`
-  (`components/page.tsx`) is a card with a section title and optional actions.
-- **Status badge** (`components/status.tsx`): a pill tinted 11% in the status colour; an ending
+- **Card** (`packages/ui/src/card.tsx`, radix-maia): `Card` (rounded 2xl, a 10% ring; `size="sm"`
+  for 16px spacing), `CardHeader`, `CardTitle`, `CardDescription`, `CardAction`, `CardContent`,
+  `CardFooter`. `Section` (`components/page.tsx`) is a Card at 20px spacing with a section title,
+  an optional description and action, and `flush` content under a rule; it clips rather than
+  hides, so sticky table headers still stick. The `card` and `tile` utilities in app.css remain
+  for the few panels that aren't sections.
+- **Composition** (every page, from shadcn's preview-02 cards): a page is cards with a header
+  (title, a one-line description of what the card already does, an outline action) over Items,
+  Fields or a table. Tables stay where people compare columns (orders, records, prices, the audit
+  log); rows read one at a time are Items (approvals, carts, people, tokens, plugins, sessions,
+  files). Forms are `FieldGroup`/`Field`/`FieldLabel` with hints as `FieldDescription` tied by
+  `aria-describedby`. Settings pages are one column of settings cards with reference material
+  (roles, install from a file) in a rail at lg, last on phones. Sign-in, setup, two-factor, the
+  single-sign-on link and OAuth consent are one centred Card.
+- **Item** (`item.tsx`, radix-maia): a row with media, content (title, description) and actions;
+  `default`, `outline` and `muted`, in `default`, `sm` and `xs`. A list of Items is a `<ul>` of
+  `Item asChild` `<li>`s (ItemGroup carries no list role). A row that opens something links its
+  title and stretches the link over the Item.
+- **Empty** (`components/page.tsx` over `empty.tsx`): the description and an optional action;
+  with an `icon` and a `title` where the empty state is the news (no orders yet).
+- **Badge, Skeleton, Separator, Kbd, Spinner, Field, Label, Breadcrumb** (`packages/ui/src`):
+  radix-maia, ported unchanged but for Lucide icons in place of shadcn's icon placeholder, a
+  BreadcrumbPage that is `aria-current` only (not a disabled link), and an ItemGroup with no list
+  role.
+- **Status badge** (`components/status.tsx`): Maia's Badge, tinted 11% in the status colour; an ending
   that went badly is ruled in the colour with a mark (✕ or undo) instead of tinted, so it reads
   apart without colour.
 - **Counts** (pending approvals in the bars): `wait` pills.
@@ -461,15 +490,16 @@ for code and data blocks only.
   the menu sits in the row's top corner. Save beside a row's field shows only once it changes.
 - **Share** (`components/share-button.tsx`): the system share sheet where there is one, else Copy
   link.
-- **Board column** (`ColumnShell` in `routes/catalog.tsx`): a card per state, headed by a section
-  title, a 0.5rem status dot before it (`wait` for Gaps, `ai` for Drafted, an ink ring at 60% for
-  Staged, which is not a status, `ok` for Published today) and its count in muted tabular figures.
-  A column's one action sits at the right of its header (Publish heads Staged). Gaps groups its
+- **Board column** (`ColumnShell` in `routes/catalog.tsx`): a `Card size="sm"` per state in a
+  labelled region, its header a section title, a 0.5rem status dot before it (`wait` for Gaps, `ai`
+  for Drafted, an ink ring at 60% for Staged, which is not a status, `ok` for Published today), the
+  count as a secondary Badge and a one-line description of what the column holds. A column's one
+  action is its `CardAction` (Publish heads Staged). Gaps groups its
   products into collapsible sections, each headed by a caption button (a chevron that turns 90°,
   the group's name and `· count`); each product appears in one group only. Longer lists end in a
   link-blue "Show more".
-- **Board card** (`CardRow`): a row inside a column card, never a card of its own: rounded xl,
-  muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
+- **Board card** (`CardRow`): an `Item size="xs"` inside a column card, never a card of its own:
+  rounded 2xl, muted at 60% on hover and when its link has focus (with a `ring` at 50%). The title (500, body
   size) is the link, stretched over the whole row; the product key is mono 2xs muted under it, then
   a muted reason line clamped to two lines, locales in mono. Its actions sit at the right, above the
   link: a ghost Draft (with the `ai` dot) that shows on hover or focus (always on touch), an outline
@@ -482,16 +512,18 @@ for code and data blocks only.
 - **Product sheet** (`components/catalog/sheet.tsx`): the side sheet from sm, 42rem wide and 56rem
   from xl; below sm the bottom sheet. Its content is a flush `Table`: fields as rows, locales as
   columns (mono, not uppercase, the most-filled first), the field-name column sticky on the left
-  with the sheet's background; the strip scrolls sideways. Below sm each field lists its locales
+  with the card's background; the strip scrolls sideways. Below sm each field lists its locales
   stacked, a mono locale beside each value. The field that put the product on the board is tinted
-  muted at 60% with a `ring` at 40%, scrolled into view and its first action focused. Groups inside
-  are headed by captions.
+  muted at 60% with a `ring` at 40%, scrolled into view and its first action focused. Each group
+  (Refused, Status, Content, From the feed, Published changes) is a `Card size="sm"` in a labelled
+  region, titled in `CardTitle`; the Content table runs flush inside its card.
 - **Source marker** (in the sheet): every value is labelled 2xs/500 muted, with a 0.375rem dot where
   it isn't plain feed data: From feed (no dot), Edited here and Staged (ink), Draft (`ai`), Draft
   with its field changed since, Conflict and Missing (`wait`), Didn't publish (`bad`). A field with
   no value and no gap is a muted dash, "Empty" to screen readers.
 - **Approvals inbox** (`routes/approvals.tsx`): pending approvals are grouped by flow · step · rule
-  (`groupApprovals` in `lib/approvals.ts`), one card per group, headed by a section title naming all
+  (`groupApprovals` in `lib/approvals.ts`), one Card per group in a labelled region (its batch
+  controls the `CardAction`), each pending row a muted Item, headed by a section title naming all
   three, then a muted line with the count, when the first closes and any order title every row
   shares. Rows say only what differs: the deadline first (`DecisionDeadline`: muted "Decide in 3m"
   or "Closes 2:05 PM", ink in the last ten seconds, never `wait`), the ref (mono), the customer and

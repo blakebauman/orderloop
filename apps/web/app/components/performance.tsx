@@ -1,4 +1,6 @@
 import { BASE_CURRENCY, ORDER_MODEL_LABELS, type OrderModel } from '@orderloop/core';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@orderloop/ui/card';
+import { Separator } from '@orderloop/ui/separator';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Empty } from '~/components/page';
 import { count, duration, money } from '~/lib/format';
@@ -19,29 +21,46 @@ export function PerformanceDetail({ p }: { p: Figures }) {
   const slowest = p.nodes.slice(0, 6);
   const { collected, refunded } = p.totals;
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {/* The one figure first, as its own card; then the two that need reading row by row. */}
+      <Card size="sm" className="min-w-0">
+        <CardHeader className="gap-1">
+          <CardDescription>
+            <h3>Refund rate</h3>
+          </CardDescription>
+          <CardTitle className="font-semibold text-2xl tabular max-md:text-xl">
+            {collected ? pct(refunded / collected) : '—'}
+          </CardTitle>
+          <CardDescription className="text-xs tabular">
+            {base(refunded)} refunded of {base(collected)} collected in the period, from orders in
+            any state
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
       <Panel title="Completion by commerce model">
         {p.completion.length ? (
-          <ul className="space-y-2">
-            {p.completion.map((c) => {
+          <ul className="flex flex-col">
+            {p.completion.map((c, i) => {
               const enough = c.finished >= MIN_FOR_RATE;
               const rate = c.finished ? c.completed / c.finished : 0;
               return (
                 <li key={c.model}>
+                  {i ? <Separator className="my-2.5" /> : null}
                   <div className="flex items-baseline justify-between gap-2 text-sm">
-                    <span className="truncate">
+                    <span className="truncate text-muted-foreground">
                       {ORDER_MODEL_LABELS[c.model as OrderModel] ?? c.model}
                     </span>
-                    <span className="font-medium tabular">
+                    <span className="font-semibold tabular">
                       {enough ? pct(rate) : `${c.completed} of ${c.finished}`}
                     </span>
                   </div>
                   {enough ? (
                     <>
-                      <div className="mt-1 h-1 rounded-full bg-muted" aria-hidden="true">
-                        <div className="h-1 rounded-full bg-ok" style={{ width: pct(rate) }} />
+                      <div className="mt-1.5 h-1.5 rounded-full bg-muted" aria-hidden="true">
+                        <div className="h-1.5 rounded-full bg-ok" style={{ width: pct(rate) }} />
                       </div>
-                      <div className="mt-0.5 text-muted-foreground text-xs tabular">
+                      <div className="mt-1 text-muted-foreground text-xs tabular">
                         {count(c.completed)} of {count(c.finished)} ended orders completed
                       </div>
                     </>
@@ -59,19 +78,17 @@ export function PerformanceDetail({ p }: { p: Figures }) {
         )}
       </Panel>
 
-      <Panel title="Refund rate">
-        <div className="font-semibold text-xl tabular">
-          {collected ? pct(refunded / collected) : '—'}
-        </div>
-        <div className="text-muted-foreground text-xs tabular">
-          {base(refunded)} refunded of {base(collected)} collected in the period, from orders in any
-          state
-        </div>
-      </Panel>
-
-      <Panel title="Slowest steps, waits included">
+      <Panel
+        title="Slowest steps, waits included"
+        flush={slowest.length > 0}
+        note={
+          slowest.length
+            ? `Typical is the median; slow is the 95th percentile, shown from ${MIN_FOR_P95} runs.`
+            : undefined
+        }
+      >
         {slowest.length ? (
-          <Table edge="flush" caption="Slowest steps, waits included">
+          <Table caption="Slowest steps, waits included">
             <TableHead>
               <Tr>
                 <Th>Step</Th>
@@ -105,21 +122,39 @@ export function PerformanceDetail({ p }: { p: Figures }) {
         ) : (
           <Empty>No timed runs yet.</Empty>
         )}
-        {slowest.length ? (
-          <p className="mt-2 text-muted-foreground text-xs">
-            Typical is the median; slow is the 95th percentile, shown from {MIN_FOR_P95} runs.
-          </p>
-        ) : null}
       </Panel>
     </div>
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+/**
+ * A card read row by row. `flush` runs a table to the card's edges under a rule; `note` says how
+ * to read it, under the title.
+ */
+function Panel({
+  title,
+  note,
+  flush,
+  children,
+}: {
+  title: string;
+  note?: string;
+  flush?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="tile min-w-0 p-4">
-      <h3 className="caption mb-3">{title}</h3>
-      {children}
-    </div>
+    <Card size="sm" className={flush ? 'min-w-0 pb-0' : 'min-w-0'}>
+      <CardHeader>
+        <CardTitle className="section-title">
+          <h3>{title}</h3>
+        </CardTitle>
+        {note ? <CardDescription className="text-xs">{note}</CardDescription> : null}
+      </CardHeader>
+      {flush ? (
+        <div className="min-w-0 border-t">{children}</div>
+      ) : (
+        <CardContent>{children}</CardContent>
+      )}
+    </Card>
   );
 }

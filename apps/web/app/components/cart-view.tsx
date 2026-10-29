@@ -29,6 +29,7 @@ import {
   SHIP_TO_LIMITS,
   type ShipAddress,
 } from '@orderloop/core';
+import { Alert, AlertDescription } from '@orderloop/ui/alert';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,12 +41,23 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@orderloop/ui/alert-dialog';
+import { Badge } from '@orderloop/ui/badge';
 import { Button } from '@orderloop/ui/button';
+import { Field, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { cn } from '@orderloop/ui/lib/utils';
 import { Table, TableBody, TableHead, Td, Th, Tr } from '@orderloop/ui/table';
 import { Textarea } from '@orderloop/ui/textarea';
 import { useAgent } from 'agents/react';
+import { Clock, FileText } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -60,7 +72,7 @@ import {
   typingLabel,
   typingSeen,
 } from '~/lib/cart-typing';
-import { money, until } from '~/lib/format';
+import { money, plural, until } from '~/lib/format';
 import { useDateTime } from '~/lib/use-date-time';
 import { useNow } from '~/lib/use-now';
 
@@ -259,7 +271,17 @@ export function CartView({
               {error}
             </p>
           ) : null}
-          <Section title="Lines" flush>
+          <Section
+            title="Lines"
+            flush
+            actions={
+              cart.lines.length ? (
+                <Badge variant="secondary" className="tabular">
+                  {plural(cart.lines.length, 'line')}
+                </Badge>
+              ) : null
+            }
+          >
             {editable && cart.lines.length ? (
               <BulkLines
                 chosen={chosen.length}
@@ -387,8 +409,12 @@ export function CartView({
               onOption={(option) => apply({ op: 'set_shipping_option', option })}
             />
           ) : null}
+        </div>
 
-          <Section title="Price">
+        {/* The rail: what the cart comes to, then its files, who is here and the chat. On a phone
+            it follows the lines and the address, in the same order. */}
+        <div className="grid min-w-0 content-start gap-4">
+          <Section title="Price" description="Priced by the cart’s flow.">
             {cart.lines.length === 0 ? (
               <p className="text-muted-foreground text-sm">Add lines to price the cart.</p>
             ) : !priced ? (
@@ -396,15 +422,18 @@ export function CartView({
                 Pricing…
               </p>
             ) : q ? (
-              <dl className="grid max-w-xs grid-cols-[1fr_auto] gap-x-6 gap-y-1 text-sm tabular-nums">
+              // A summary: the parts, then the total set large under a rule.
+              <dl className="grid grid-cols-[1fr_auto] items-baseline gap-x-6 gap-y-1.5 text-sm tabular-nums">
                 <dt className="text-muted-foreground">Subtotal</dt>
                 <dd className="text-right">{money(q.subtotal, currency)}</dd>
                 <dt className="text-muted-foreground">Shipping</dt>
                 <dd className="text-right">{money(q.shipping, currency)}</dd>
                 <dt className="text-muted-foreground">Tax</dt>
                 <dd className="text-right">{money(q.tax, currency)}</dd>
-                <dt className="font-medium">Total</dt>
-                <dd className="text-right font-medium">{money(q.total, currency)}</dd>
+                <dt className="mt-1.5 border-t pt-3 font-medium">Total</dt>
+                <dd className="mt-1.5 border-t pt-3 text-right font-semibold text-xl">
+                  {money(q.total, currency)}
+                </dd>
               </dl>
             ) : null}
             {cart.issues.filter((i) => !i.path?.startsWith('$.line_items')).length ? (
@@ -428,9 +457,6 @@ export function CartView({
               onRemove={(code) => apply({ op: 'promo_remove', code })}
             />
           </Section>
-        </div>
-
-        <div className="grid min-w-0 content-start gap-4">
           <Attachments
             cartId={cart.id}
             files={state.attachments ?? []}
@@ -438,15 +464,17 @@ export function CartView({
             canRemove={(a) => !final && (a.by.id === meId || canOperate)}
             onRemove={(id) => call<Result>('detach', [id])}
           />
-          <Section title="Here now">
+          <Section title="Here now" description="Everyone with this cart open.">
             {state.members.length ? (
               <ul className="flex flex-wrap gap-1.5 text-sm">
                 {state.members.map((m) => (
-                  <li key={m.id} className="rounded-full border px-2.5 py-0.5">
-                    {m.name}
-                    {m.id === meId ? ' (you)' : ''}
-                    {m.kind === 'guest' && !guest ? ' · buyer' : ''}
-                  </li>
+                  <Badge key={m.id} variant="outline" asChild className="h-6 px-2.5 text-sm">
+                    <li>
+                      {m.name}
+                      {m.id === meId ? ' (you)' : ''}
+                      {m.kind === 'guest' && !guest ? ' · buyer' : ''}
+                    </li>
+                  </Badge>
                 ))}
               </ul>
             ) : (
@@ -504,15 +532,16 @@ function SessionEnds({ cart, guest }: { cart: NonNullable<CartState['cart']>; gu
       : near && slides
         ? `Your session ends ${at} (${until(x.expiresAt, now)}). Make a change to keep it open, or return the cart to your system.`
         : `Your session ends ${at}${near ? ` (${until(x.expiresAt, now)})` : ''}. Return the cart to your system before then.`;
-  return (
-    <p
-      role={guest && near ? 'status' : undefined}
-      className={cn(
-        'text-muted-foreground text-sm',
-        near && 'rounded-lg border border-wait/40 px-3 py-2 font-medium text-wait',
-      )}
-      suppressHydrationWarning
-    >
+  // Near the end it's a warning (a status for the buyer, whom it concerns); otherwise a hint.
+  return near ? (
+    <Alert variant="warning" role={guest ? 'status' : 'note'}>
+      <Clock aria-hidden="true" />
+      <AlertDescription className="font-medium" suppressHydrationWarning>
+        {text}
+      </AlertDescription>
+    </Alert>
+  ) : (
+    <p className="text-muted-foreground text-sm" suppressHydrationWarning>
       {text}
     </p>
   );
@@ -765,7 +794,7 @@ function AddLines({
             <ul
               aria-label="Products found"
               aria-busy={searching}
-              className="max-h-80 divide-y overflow-y-auto overscroll-contain rounded-lg border"
+              className="flex max-h-80 flex-col gap-0.5 overflow-y-auto overscroll-contain rounded-2xl border p-1"
             >
               {found.products.map((p) => (
                 <FoundProduct key={p.sku} product={p} currency={found.currency} onAdd={onAdd} />
@@ -798,48 +827,52 @@ function FoundProduct({
   const n = Number(qty);
   const valid = Number.isInteger(n) && n >= 1 && n <= MAX_LINE_QUANTITY;
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 text-sm">
-      <div className="min-w-0 flex-1 basis-40">
-        <div className="truncate font-medium">{p.name}</div>
-        <div className="font-mono text-muted-foreground text-xs">{p.sku}</div>
-      </div>
-      {p.unitPrice !== null ? (
-        <div className="text-right tabular-nums">
-          {money(p.unitPrice, currency)}
-          <span className="text-muted-foreground text-xs"> each</span>
-        </div>
-      ) : null}
-      <form
-        className="ml-auto flex items-center gap-2"
-        onSubmit={async (e) => {
-          e.preventDefault();
-          if (!valid) return;
-          const r = await onAdd(p.sku, n);
-          if (r?.ok) {
-            setQty('1');
-            setAdded(true);
-          }
-        }}
-      >
-        <Input
-          aria-label={`Quantity of ${p.sku} to add`}
-          inputMode="numeric"
-          value={qty}
-          onChange={(e) => {
-            setQty(e.target.value);
-            setAdded(false);
+    <Item asChild size="xs" className="gap-x-3 gap-y-1.5 hover:bg-muted/60">
+      <li>
+        <ItemContent className="min-w-0 basis-40 gap-0">
+          <ItemTitle className="w-full">
+            <span className="truncate">{p.name}</span>
+          </ItemTitle>
+          <ItemDescription className="font-mono text-xs">{p.sku}</ItemDescription>
+        </ItemContent>
+        {p.unitPrice !== null ? (
+          <div className="text-right tabular-nums">
+            {money(p.unitPrice, currency)}
+            <span className="text-muted-foreground text-xs"> each</span>
+          </div>
+        ) : null}
+        <form
+          className="ml-auto flex items-center gap-2"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!valid) return;
+            const r = await onAdd(p.sku, n);
+            if (r?.ok) {
+              setQty('1');
+              setAdded(true);
+            }
           }}
-          aria-invalid={!valid || undefined}
-          className="h-8 w-16 text-right"
-        />
-        <Button type="submit" size="sm" variant="outline" disabled={!valid} className="hit-area">
-          Add<span className="sr-only"> {p.sku}</span>
-        </Button>
-        <span className="w-10 text-muted-foreground text-xs" aria-live="polite">
-          {added ? 'Added' : ''}
-        </span>
-      </form>
-    </li>
+        >
+          <Input
+            aria-label={`Quantity of ${p.sku} to add`}
+            inputMode="numeric"
+            value={qty}
+            onChange={(e) => {
+              setQty(e.target.value);
+              setAdded(false);
+            }}
+            aria-invalid={!valid || undefined}
+            className="h-8 w-16 text-right"
+          />
+          <Button type="submit" size="sm" variant="outline" disabled={!valid} className="hit-area">
+            Add<span className="sr-only"> {p.sku}</span>
+          </Button>
+          <span className="w-10 text-muted-foreground text-xs" aria-live="polite">
+            {added ? 'Added' : ''}
+          </span>
+        </form>
+      </li>
+    </Item>
   );
 }
 
@@ -861,10 +894,8 @@ function AddBySku({ onAdd }: { onAdd: (sku: string, qty: number) => Promise<Resu
         }
       }}
     >
-      <div className="grid gap-1 text-sm">
-        <label htmlFor="add-sku" className="caption">
-          Or add by SKU
-        </label>
+      <Field className="w-44 gap-1.5">
+        <FieldLabel htmlFor="add-sku">Or add by SKU</FieldLabel>
         <Input
           id="add-sku"
           value={sku}
@@ -876,11 +907,9 @@ function AddBySku({ onAdd }: { onAdd: (sku: string, qty: number) => Promise<Resu
           className="h-8 w-44"
           required
         />
-      </div>
-      <div className="grid gap-1 text-sm">
-        <label htmlFor="add-qty" className="caption">
-          Qty
-        </label>
+      </Field>
+      <Field className="w-20 gap-1.5">
+        <FieldLabel htmlFor="add-qty">Qty</FieldLabel>
         <Input
           id="add-qty"
           inputMode="numeric"
@@ -889,7 +918,7 @@ function AddBySku({ onAdd }: { onAdd: (sku: string, qty: number) => Promise<Resu
           className="h-8 w-20"
           required
         />
-      </div>
+      </Field>
       <Button type="submit" size="sm" variant="outline" className="hit-area">
         Add line
       </Button>
@@ -1115,10 +1144,8 @@ function ShipTo({
           }}
         >
           {ADDRESS_FIELDS.map(({ field, label, autoComplete, wide }) => (
-            <div key={field} className={`grid gap-1 text-sm ${wide ? 'sm:col-span-2' : ''}`}>
-              <label htmlFor={`ship-${field}`} className="caption">
-                {label}
-              </label>
+            <Field key={field} className={cn('gap-1.5', wide && 'sm:col-span-2')}>
+              <FieldLabel htmlFor={`ship-${field}`}>{label}</FieldLabel>
               <Input
                 id={`ship-${field}`}
                 autoComplete={autoComplete}
@@ -1127,7 +1154,7 @@ function ShipTo({
                 onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}
                 className="h-8"
               />
-            </div>
+            </Field>
           ))}
           <div className="flex gap-2 sm:col-span-2">
             <Button type="submit" size="sm" variant="outline" disabled={!changed}>
@@ -1297,34 +1324,43 @@ function Attachments({
     }
   }
   return (
-    <Section title="Files" flush>
+    <Section title="Files" description="Anyone on the cart can download them." flush>
       {files.length ? (
-        <ul className="divide-y text-sm">
+        <ul className="flex flex-col gap-0.5 p-2">
           {files.map((a) => (
-            <li key={a.id} className="flex items-start justify-between gap-2 px-4 py-2">
-              <div className="min-w-0">
-                <a
-                  href={`/carts/${cartId}/attachments/${a.id}`}
-                  className="block truncate text-link hover:underline"
-                  download={a.name}
-                >
-                  {a.name}
-                </a>
-                <div className="text-muted-foreground text-xs">
-                  {ATTACHMENT_TYPES[a.type] ?? a.type} · {size(a.size)} · {a.by.name} ·{' '}
-                  <Ago ms={a.at} />
-                </div>
-              </div>
-              {canRemove(a) ? (
-                <button
-                  type="button"
-                  className="text-muted-foreground text-xs hover:underline"
-                  onClick={() => void onRemove(a.id)}
-                >
-                  Remove
-                </button>
-              ) : null}
-            </li>
+            <Item key={a.id} asChild size="xs" className="items-start">
+              <li>
+                <ItemMedia variant="icon" className="mt-0.5 self-start text-muted-foreground">
+                  <FileText aria-hidden="true" />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="w-full font-normal">
+                    <a
+                      href={`/carts/${cartId}/attachments/${a.id}`}
+                      className="truncate text-link hover:underline"
+                      download={a.name}
+                    >
+                      {a.name}
+                    </a>
+                  </ItemTitle>
+                  <ItemDescription className="text-xs">
+                    {ATTACHMENT_TYPES[a.type] ?? a.type} · {size(a.size)} · {a.by.name} ·{' '}
+                    <Ago ms={a.at} />
+                  </ItemDescription>
+                </ItemContent>
+                {canRemove(a) ? (
+                  <ItemActions className="self-start">
+                    <button
+                      type="button"
+                      className="hit-area text-muted-foreground text-xs hover:underline"
+                      onClick={() => void onRemove(a.id)}
+                    >
+                      Remove
+                    </button>
+                  </ItemActions>
+                ) : null}
+              </li>
+            </Item>
           ))}
         </ul>
       ) : (

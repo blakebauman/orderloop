@@ -4,8 +4,18 @@
  */
 
 import { Button } from '@orderloop/ui/button';
+import { Field, FieldError, FieldGroup, FieldLabel } from '@orderloop/ui/field';
 import { Input } from '@orderloop/ui/input';
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemMedia,
+  ItemTitle,
+} from '@orderloop/ui/item';
 import { browserSupportsWebAuthn, startRegistration } from '@simplewebauthn/browser';
+import { KeyRound } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useRevalidator } from 'react-router';
 import { Ago } from '~/components/ago';
@@ -94,128 +104,19 @@ export function Passkeys({ passkeys }: { passkeys: PasskeyRow[] }) {
   };
 
   const passwordField = (id: string) => (
-    <label className="block text-sm" htmlFor={id}>
-      Your password
-      <Input
-        id={id}
-        name="password"
-        type="password"
-        required
-        autoComplete="current-password"
-        className="mt-1"
-      />
-    </label>
+    <Field>
+      <FieldLabel htmlFor={id}>Your password</FieldLabel>
+      <Input id={id} name="password" type="password" required autoComplete="current-password" />
+    </Field>
   );
-  const errorLine = error ? (
-    <p role="alert" className="text-destructive text-sm">
-      {error}
-    </p>
-  ) : null;
+  const errorLine = error ? <FieldError>{error}</FieldError> : null;
 
   return (
-    <Section title="Passkeys" className="mt-6">
-      <div className="space-y-4">
-        <p className="text-muted-foreground text-sm">
-          Sign in with your fingerprint, face or device PIN instead of your password and code. A
-          passkey stays on your device or password manager; OrderLoop keeps only its public key.
-        </p>
-        {said ? (
-          <p ref={statusLine} tabIndex={-1} role="status" className="text-sm outline-none">
-            {said}
-          </p>
-        ) : null}
-        {passkeys.length ? (
-          <ul className="divide-y rounded-lg border text-sm">
-            {passkeys.map((p) => (
-              <li key={p.id} className="p-3">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <span className="font-medium">{p.name}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {p.backedUp ? 'synced' : 'this device only'} · added <Ago ms={p.createdAt} />
-                    {p.lastUsedAt ? (
-                      <>
-                        {' '}
-                        · used <Ago ms={p.lastUsedAt} />
-                      </>
-                    ) : null}
-                  </span>
-                  {removing === p.id ? null : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="ml-auto"
-                      onClick={() => {
-                        setRemoving(p.id);
-                        setAdding(false);
-                        setError(null);
-                      }}
-                    >
-                      Remove
-                    </Button>
-                  )}
-                </div>
-                {removing === p.id ? (
-                  <form
-                    className="mt-3 space-y-2"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      void remove(e.currentTarget, p.id, p.name);
-                    }}
-                  >
-                    {passwordField(`remove-${p.id}`)}
-                    {errorLine}
-                    <div className="flex gap-2">
-                      <Button type="submit" size="sm" variant="destructive" disabled={busy}>
-                        {busy ? 'Removing…' : 'Remove passkey'}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setRemoving(null)}
-                      >
-                        Keep it
-                      </Button>
-                    </div>
-                  </form>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {!supported ? (
-          <p className="text-muted-foreground text-sm">This browser can’t create passkeys.</p>
-        ) : adding ? (
-          <form
-            className="space-y-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void add(e.currentTarget);
-            }}
-          >
-            <label className="block text-sm" htmlFor="passkey-name">
-              Name <span className="text-muted-foreground">(optional)</span>
-              <Input
-                id="passkey-name"
-                name="name"
-                maxLength={60}
-                placeholder="e.g. Work laptop"
-                className="mt-1"
-              />
-            </label>
-            {passwordField('passkey-password')}
-            {errorLine}
-            <div className="flex gap-2">
-              <Button type="submit" size="sm" disabled={busy}>
-                {busy ? 'Waiting for your device…' : 'Continue'}
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(false)}>
-                Cancel
-              </Button>
-            </div>
-          </form>
-        ) : (
+    <Section
+      title="Passkeys"
+      description="Sign in with your fingerprint, face or device PIN instead of your password and code. A passkey stays on your device or password manager; OrderLoop keeps only its public key."
+      actions={
+        supported && !adding ? (
           <Button
             type="button"
             size="sm"
@@ -229,6 +130,118 @@ export function Passkeys({ passkeys }: { passkeys: PasskeyRow[] }) {
           >
             Add a passkey
           </Button>
+        ) : undefined
+      }
+    >
+      <div className="space-y-4">
+        {said ? (
+          <p ref={statusLine} tabIndex={-1} role="status" className="text-sm outline-none">
+            {said}
+          </p>
+        ) : null}
+        {passkeys.length ? (
+          <ul className="-mx-2 flex flex-col gap-1">
+            {passkeys.map((p) => (
+              <Item key={p.id} asChild size="sm" variant={removing === p.id ? 'muted' : 'default'}>
+                <li>
+                  <ItemMedia variant="icon" className="size-8 rounded-full bg-muted">
+                    <KeyRound className="text-muted-foreground" aria-hidden="true" />
+                  </ItemMedia>
+                  <ItemContent className="min-w-0">
+                    <ItemTitle>{p.name}</ItemTitle>
+                    <ItemDescription className="text-xs">
+                      {p.backedUp ? 'synced' : 'this device only'} · added <Ago ms={p.createdAt} />
+                      {p.lastUsedAt ? (
+                        <>
+                          {' '}
+                          · used <Ago ms={p.lastUsedAt} />
+                        </>
+                      ) : null}
+                    </ItemDescription>
+                  </ItemContent>
+                  {removing === p.id ? null : (
+                    <ItemActions>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setRemoving(p.id);
+                          setAdding(false);
+                          setError(null);
+                        }}
+                      >
+                        Remove
+                      </Button>
+                    </ItemActions>
+                  )}
+                  {removing === p.id ? (
+                    <form
+                      className="basis-full"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void remove(e.currentTarget, p.id, p.name);
+                      }}
+                    >
+                      <FieldGroup className="gap-3">
+                        {passwordField(`remove-${p.id}`)}
+                        {errorLine}
+                        <div className="flex gap-2">
+                          <Button type="submit" size="sm" variant="destructive" disabled={busy}>
+                            {busy ? 'Removing…' : 'Remove passkey'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => setRemoving(null)}
+                          >
+                            Keep it
+                          </Button>
+                        </div>
+                      </FieldGroup>
+                    </form>
+                  ) : null}
+                </li>
+              </Item>
+            ))}
+          </ul>
+        ) : null}
+        {!supported ? (
+          <p className="text-muted-foreground text-sm">This browser can’t create passkeys.</p>
+        ) : adding ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void add(e.currentTarget);
+            }}
+          >
+            <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel htmlFor="passkey-name">
+                  Name <span className="font-normal text-muted-foreground">(optional)</span>
+                </FieldLabel>
+                <Input
+                  id="passkey-name"
+                  name="name"
+                  maxLength={60}
+                  placeholder="e.g. Work laptop"
+                />
+              </Field>
+              {passwordField('passkey-password')}
+              {errorLine}
+              <div className="flex gap-2">
+                <Button type="submit" size="sm" disabled={busy}>
+                  {busy ? 'Waiting for your device…' : 'Continue'}
+                </Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setAdding(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </FieldGroup>
+          </form>
+        ) : passkeys.length ? null : (
+          <p className="text-muted-foreground text-sm">No passkeys yet.</p>
         )}
       </div>
     </Section>
