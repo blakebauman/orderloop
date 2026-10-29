@@ -33,21 +33,29 @@ import {
   type UIMessage,
 } from 'ai';
 import {
+  Archive,
   ArrowDown,
   ArrowUpRight,
   Ban,
   Boxes,
   Brain,
+  Check,
   CircleAlert,
+  Copy,
   FileText,
+  FlaskConical,
   Inbox,
   Library,
   type LucideIcon,
   PenLine,
+  Play,
   Puzzle,
+  Scale,
   Search,
   ShoppingCart,
+  Undo2,
   Workflow,
+  Wrench,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -123,6 +131,15 @@ const ICONS: Record<string, LucideIcon> = {
   propose_flow_change: PenLine,
   draft_plugin: Puzzle,
   draft_product_content: PenLine,
+  assess_order: Scale,
+  start_scenario: Play,
+  create_flow: Workflow,
+  duplicate_flow: Copy,
+  archive_flow: Archive,
+  stage_product_edits: PenLine,
+  accept_product_drafts: Check,
+  discard_product_edits: Undo2,
+  run_plugin_cases: FlaskConical,
 };
 
 const RUNNING: Record<string, string> = {
@@ -176,7 +193,8 @@ function found(name: string, out: Record<string, unknown>): string | null {
     case 'draft_product_content':
       return `${out.title} · ${n(out.drafted)} drafted${n(out.refused) ? ` · ${n(out.refused)} not` : ''}`;
     default:
-      return null;
+      // An action the page ran through the assistant says what it did ("Started #nxb697").
+      return typeof out.done === 'string' ? out.done : null;
   }
 }
 
@@ -218,7 +236,7 @@ function age(iso: string): string {
  */
 export function ReadLine({ part, streaming }: { part: Part; streaming: boolean }) {
   const name = getToolName(part);
-  const Icon = ICONS[name] ?? Search;
+  const Icon = ICONS[name] ?? Wrench;
   const label = isAssistantTool(name) ? ASSISTANT_TOOLS[name].label : name;
   const doing = RUNNING[name] ?? label;
   const unfinished = part.state === 'input-streaming' || part.state === 'input-available';
@@ -254,7 +272,11 @@ export function ReadLine({ part, streaming }: { part: Part; streaming: boolean }
   const result = out ? found(name, out) : null;
   const record = out ? recordOf(name, out) : null;
   const node = out && name === 'get_order' ? focusNode(out) : null;
-  const href = record ? `${record.href}${node ? `?node=${encodeURIComponent(node)}` : ''}` : null;
+  const href = record
+    ? `${record.href}${node ? `?node=${encodeURIComponent(node)}` : ''}`
+    : out && typeof out.done === 'string' && str(out.href).startsWith('/')
+      ? str(out.href)
+      : null;
   const line = (
     <TraceLine>
       <TraceIcon>

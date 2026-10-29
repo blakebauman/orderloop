@@ -292,7 +292,7 @@ export const ASSISTANT_TOOLS: Record<
     role: 'operator',
     // Fixed demo data, only where it is loaded, and only from its button (`PAGE_ONLY_TOOLS`).
     confirm: false,
-    label: 'Run a demo scenario',
+    label: 'Ran a demo scenario',
     title: 'Run a demo scenario',
     description:
       'Start one of the workspace’s demo scenario orders by its id. Only where the demo data is loaded.',
