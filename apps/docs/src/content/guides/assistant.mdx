@@ -15,6 +15,28 @@ One assistant serves every page.
 - The **Assistant** button at the top of the page, or <kbd>⌘J</kbd> (<kbd>Ctrl</kbd>+<kbd>J</kbd>) anywhere,
   which also closes it. On wide screens the panel reopens on your next visit if you left it open.
 - The **Ask** button on an order page or in the flow editor opens the panel about that order or flow.
+- Changing something from a page. See [Edits from a page](#edits-from-a-page).
+
+## Edits from a page
+
+Changes you make on a page go through the assistant. The page's button doesn't change anything
+itself. Instead, the assistant runs the tool for exactly what you pressed, with no model involved,
+so these edits work even when the model is unavailable. Each edit stays in your conversation as a
+line.
+
+- **An action** stops at its confirm card in the panel. The panel opens if it was closed. This
+  covers deciding approvals (one or a batch), cancelling an order, delivering an event from the
+  order page, submitting a cart and running the stock review. The page waits until you answer, and declining leaves everything as it
+  was.
+- **Anything else** runs at once and doesn't open the panel. This covers changing a cart's lines,
+  promo codes, ship-to and shipping option, and locking or unlocking it. The page updates as usual.
+
+These edits are checked like any other tool call: your role, the live order or cart, and the same
+audit trail (`via` the assistant, marked `direct` so a button press reads apart from a model's
+proposal). The conversation keeps only what each line needs: an action keeps what its card states,
+and any other edit keeps only its ids and what it did. Cart text, addresses and names stay on the
+page. A buyer on an external cart has no assistant, so their own
+changes go straight to the cart.
 
 Enter sends, Shift+Enter starts a new line; on a phone or tablet Return starts a new line and the
 send button sends. **Stop** ends a reply in progress. A message written while a reply is still
@@ -86,7 +108,8 @@ sent until you press the confirm button, and declining leaves everything as it w
 | Action | Needs | Does |
 |---|---|---|
 | `decide_approval` | `approver` | Approves or rejects the approval an order waits on, with an optional note |
-| `deliver_event` | `operator` | Delivers a business event to the order waiting for it |
+| `decide_approvals` | `approver` | Approves or rejects up to 25 open approvals on one card, with one note; each is decided on its own, and one that can't be is skipped with the reason |
+| `deliver_event` | `operator` | Delivers a business event to the order waiting for it, optionally with up to 20 flat fields it carries, each value at most 120 characters and shown quoted on the card. The fields a source writes itself (`by`, `event`, `at`, `outcome`, `source`, `provider`, `invoiceId`, `paymentIntentId`, `note`) are refused |
 | `cancel_order` | `operator` | Cancels the order and undoes what it did, as [Cancelling](/guides/approvals-and-events/#cancelling) |
 | `submit_cart` | `operator` | Submits a priced cart as an order of its flow, as [Submit as order](/guides/carts/#locking-submitting-and-cancelling) |
 | `publish_flow` | `operator` | Publishes the flow's saved draft as the next version |
@@ -114,8 +137,7 @@ Confirming runs the action as you, after the engine re-checks your role and the 
 again. The state can have changed since the card appeared, in which case the action is refused with
 the reason. A cart is held to the card exactly: if it changed at all after the card first appeared, the
 submit is refused and nothing is ordered, and the same card opened again (in another tab, say)
-says so instead of offering a confirm; ask again for a new card. An approval decided here has no 5-second undo window, because the confirm is the
-check. The audit trail names the actor as `<email> via assistant`: that string is the approval's
+says so instead of offering a confirm; ask again for a new card. The audit trail names the actor as `<email> via assistant`: that string is the approval's
 `by`, or ends the cancel reason. A confirmed action is also an [audit log](/guides/team-and-roles/#audit-log) event (`via` the assistant, with the `tool`); read-only tools are not logged.
 
 ## Roles

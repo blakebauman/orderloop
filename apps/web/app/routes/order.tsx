@@ -64,7 +64,7 @@ import {
 } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Code } from '~/components/code';
-import { DecisionContext, DecisionControls, sendDecision } from '~/components/decision';
+import { DecisionContext, DecisionControls } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Empty, Section } from '~/components/page';
@@ -268,10 +268,24 @@ function OrderView() {
     wasRolled.current = now;
   }, [state]);
 
+  const { act } = useAssistant();
   const call = async (label: string, method: string, args: unknown[]) => {
     setBusy(label);
     setError(null);
     try {
+      // Edits go through the assistant, as its own tool calls: the person confirms on its card.
+      if (method === 'decide') {
+        const [nodeId, decision, , note] = args;
+        return await act('decide_approval', { orderId: state.orderId, nodeId, decision, note });
+      }
+      if (method === 'cancel')
+        return await act('cancel_order', { orderId: state.orderId, reason: args[0] });
+      if (method === 'deliver')
+        return await act('deliver_event', {
+          orderId: state.orderId,
+          event: args[0],
+          payload: args[1],
+        });
       return await agent.call(method, args);
     } catch (e) {
       const detail = e instanceof Error ? e.message : String(e);
@@ -1052,9 +1066,6 @@ function Actions({
                       onDecide={(decision, note) =>
                         void call('decide', 'decide', [w.nodeId, decision, by, note || undefined])
                       }
-                      onFlush={(decision, note) =>
-                        sendDecision(state.orderId!, w.nodeId, decision, note)
-                      }
                     />
                   ) : (
                     <p className="text-muted-foreground text-xs">An approver decides this.</p>
@@ -1077,7 +1088,7 @@ function Actions({
                               onClick={() =>
                                 call('event', 'deliver', [
                                   w.event,
-                                  { source: 'dashboard', sellerId: s.sellerId, decision },
+                                  { sellerId: s.sellerId, decision },
                                 ])
                               }
                             >
@@ -1095,10 +1106,7 @@ function Actions({
                     variant="outline"
                     disabled={!!busy}
                     onClick={() =>
-                      call('event', 'deliver', [
-                        w.event,
-                        { source: 'dashboard', amount: state.order?.total },
-                      ])
+                      call('event', 'deliver', [w.event, { amount: state.order?.total }])
                     }
                   >
                     {eventAction(w.event!)}

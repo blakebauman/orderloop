@@ -69,11 +69,18 @@ export function boundExtractedLines(
   return { lines, rejected };
 }
 
-/** A short single-line field from a model: control characters gone, cut to `max`; null if empty. */
+/**
+ * A short single-line field from a model: control characters gone, and the invisible format
+ * characters (bidi overrides, zero-widths) that would make it read other than it is; cut to `max`,
+ * null if empty.
+ */
 export function boundText(value: unknown, max: number): string | null {
   if (typeof value !== 'string') return null;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
-  const s = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
+  const s = value
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping them is the point
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\p{Cf}+/gu, '')
+    .trim();
   return s ? s.slice(0, max) : null;
 }
 

@@ -16,8 +16,10 @@ import {
   type AssistantContext,
   type AssistantTool,
   atLeast,
+  DIRECT_CALL,
   fingerprintOf,
   flowGraphSchema,
+  isAssistantTool,
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
@@ -30,6 +32,7 @@ import {
   streamText,
   type ToolSet,
   tool,
+  type UIMessage,
 } from 'ai';
 import type { z } from 'zod';
 import { forwardedPrincipal, livePrincipal, SESSION_ENDED } from '../principal';
@@ -41,6 +44,7 @@ import {
   type Confirmed,
   previewAction,
   Refused,
+  requireRole,
 } from './data';
 import { assistantModel, type ModelSource } from './model';
 import { ACTION_TOOLS, runTool, TOOL_INPUTS, type ToolInput } from './tools';
@@ -144,11 +148,149 @@ export class AssistantAgent extends AIChatAgent<Env> {
           : [];
       }),
     );
-    const old = [...(await this.ctx.storage.list<Shown>({ prefix: 'shown:' }))]
+    const old = [
+      ...(await this.ctx.storage.list<Shown>({ prefix: 'shown:' })),
+      ...(await this.ctx.storage.list<Direct>({ prefix: 'direct:' })),
+    ]
       .filter(([, v]) => Date.now() - (v.at ?? 0) > 86_400_000)
       .map(([k]) => k);
     const gone = [...new Set([...declined, ...old])];
     if (gone.length) await this.ctx.storage.delete(gone);
+  }
+
+  /**
+   * An edit a page made through the assistant: the page's own button, with the exact tool call and
+   * no model. It joins the conversation as one tool call of its own. An action stops at its confirm
+   * card (`resolve` answers it); anything else runs now, and its result is what this returns.
+   *
+   * The conversation is stored and the model reads it on the person's next turn, so a call keeps
+   * only what its line needs (`kept`): an action keeps the input its card states, any other call
+   * only its ids, and every result only what it did and where. Cart text, addresses and names stay
+   * in the page's own result.
+   */
+  @callable()
+  async act(name: unknown, raw: unknown) {
+    const p = await this.caller();
+    if (typeof name !== 'string' || !isAssistantTool(name)) throw new Error(`Not a tool: ${name}`);
+    requireRole(p, name);
+    const input = TOOL_INPUTS[name].parse(raw ?? {}) as ToolInput<typeof name>;
+    const toolCallId = `${DIRECT}${crypto.randomUUID()}`;
+    const confirm = ASSISTANT_TOOLS[name].confirm;
+    const base = {
+      type: `tool-${name}`,
+      toolCallId,
+      input: confirm ? input : idsOf(input),
+      toolMetadata: { direct: true },
+    };
+    const say = (part: Record<string, unknown>) =>
+      this.persistMessages([
+        ...this.messages,
+        {
+          id: `msg_${toolCallId}`,
+          role: 'assistant',
+          parts: [{ type: 'step-start' }, part],
+          metadata: { source: 'direct', at: Date.now() },
+        } as UIMessage,
+      ]);
+    if (confirm) {
+      // What `resolve` may run: this tool with this input, made here, not a part a browser wrote.
+      await this.ctx.storage.put(directKey(toolCallId), {
+        name,
+        digest: await fingerprintOf({ name, input }),
+        at: Date.now(),
+      } satisfies Direct);
+      await say({ ...base, state: 'approval-requested', approval: { id: toolCallId } });
+      return { callId: toolCallId, waiting: true as const };
+    }
+    try {
+      const output = await runTool(this.env, p, name, input, { via: 'assistant', direct: true });
+      await say({ ...base, state: 'output-available', output: kept(output) });
+      return { callId: toolCallId, output };
+    } catch (err) {
+      await say({ ...base, state: 'output-error', errorText: errorLine(err) });
+      throw err;
+    }
+  }
+
+  /**
+   * The answer to a confirm card `act` made. It runs the action, held to what the card showed, or
+   * leaves it as it was; either way no model turn starts. A second answer (another tab) changes
+   * nothing. The card waits as asked while the action runs, so nothing reads it as approved but
+   * not run.
+   */
+  @callable()
+  async resolve(callId: unknown, approved: unknown) {
+    if (typeof callId !== 'string' || !callId.startsWith(DIRECT))
+      throw new Error('Not a direct call');
+    if (this.resolving.has(callId)) throw new Refused(ALREADY_ANSWERED);
+    this.resolving.add(callId);
+    try {
+      const p = await this.caller();
+      const found = this.directPart(callId);
+      const made = await this.ctx.storage.get<Direct>(directKey(callId));
+      if (found?.part.state !== 'approval-requested' || !made) throw new Refused(ALREADY_ANSWERED);
+      const { name } = found.part;
+      const parsed = TOOL_INPUTS[name].safeParse(found.part.input ?? {});
+      if (
+        made.name !== name ||
+        !parsed.success ||
+        made.digest !== (await fingerprintOf({ name, input: parsed.data }))
+      )
+        throw new Refused(ALREADY_ANSWERED);
+      const input = parsed.data as ToolInput<typeof name>;
+      await this.ctx.storage.delete(directKey(callId));
+      const write = (part: Record<string, unknown>) =>
+        this.persistMessages(
+          this.messages.map((m) =>
+            m.id === found.message.id
+              ? {
+                  ...m,
+                  parts: m.parts.map((x) => {
+                    if ((x as { toolCallId?: string }).toolCallId !== callId) return x;
+                    const { errorText: _e, output: _o, ...rest } = x as Record<string, unknown>;
+                    return { ...rest, ...part } as UIMessage['parts'][number];
+                  }),
+                }
+              : m,
+          ),
+        );
+      if (approved !== true) {
+        await this.shown(callId, name, input);
+        await write({ state: 'output-denied', approval: { id: callId, approved: false } });
+        return { done: null };
+      }
+      const approval = { id: callId, approved: true };
+      try {
+        const output = await runTool(this.env, p, name, input, {
+          via: 'assistant',
+          direct: true,
+          confirmed: await this.shown(callId, name, input),
+        });
+        await write({ state: 'output-available', approval, output: kept(output) });
+        return { output };
+      } catch (err) {
+        await write({ state: 'output-error', approval, errorText: errorLine(err) });
+        throw err;
+      }
+    } finally {
+      this.resolving.delete(callId);
+    }
+  }
+
+  /** Calls being answered now: an answer from a second tab is refused, not run twice. */
+  private resolving = new Set<string>();
+
+  /** The tool call `act` made with this id, in the message it is in. */
+  private directPart(callId: string) {
+    for (const message of this.messages)
+      for (const part of message.parts) {
+        const t = part as { type: string; toolCallId?: string; state?: string; input?: unknown };
+        if (t.toolCallId !== callId || !t.type.startsWith('tool-')) continue;
+        const name = t.type.slice(5);
+        if (!isAssistantTool(name)) return null;
+        return { message, part: { name, input: t.input, state: t.state } };
+      }
+    return null;
   }
 
   override async onChatMessage(
@@ -177,7 +319,7 @@ export class AssistantAgent extends AIChatAgent<Env> {
       }),
       system: systemPrompt(p, context),
       messages: pruneMessages({
-        messages: await convertToModelMessages(this.messages),
+        messages: await convertToModelMessages(answeredOnly(this.messages)),
         reasoning: 'before-last-message',
         toolCalls: 'before-last-2-messages',
       }),
@@ -239,6 +381,57 @@ type Shown = {
 const shownKey = (callId: string) => `shown:${callId}`;
 
 const SHOWN_CHANGED = 'This changed since the card was first shown. Ask again for a new card.';
+
+export const DIRECT = DIRECT_CALL;
+
+const ALREADY_ANSWERED = 'This was already answered.';
+
+/** What a stored call says went wrong: a refusal's own words, never an internal error's. */
+const errorLine = (err: unknown) =>
+  err instanceof Refused ? err.message : 'That didn’t go through. Try again in a moment.';
+
+/** A confirm card `act` made, kept until it is answered. */
+type Direct = { name: AssistantTool; digest: string; at: number };
+
+const directKey = (callId: string) => `direct:${callId}`;
+
+/** A call's ids, all a page edit's line needs: cart text and addresses stay out of the store. */
+function idsOf(input: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries((input ?? {}) as Record<string, unknown>).filter(
+      (e): e is [string, string] => /Id$/.test(e[0]) && typeof e[1] === 'string',
+    ),
+  );
+}
+
+/** What a page edit's result keeps in the conversation: what it did and where, and counts. */
+function kept(output: unknown): Record<string, unknown> {
+  const o = (output ?? {}) as Record<string, unknown>;
+  const pick = ['done', 'href', 'id', 'status', 'applied', 'version', 'orderId', 'instanceId'];
+  const out = Object.fromEntries(pick.filter((k) => k in o).map((k) => [k, o[k]]));
+  if (Array.isArray(o.results))
+    out.results = o.results.map((r: Record<string, unknown>) => ({
+      orderId: r.orderId,
+      nodeId: r.nodeId,
+      ok: r.ok,
+      ...(r.error ? { error: r.error } : {}),
+    }));
+  return out;
+}
+
+/**
+ * The conversation as the model reads it: a page's confirm card still waiting has no result yet
+ * and isn't the model's to answer, so it is left out until the person answers it.
+ */
+export function answeredOnly(messages: UIMessage[]): UIMessage[] {
+  return messages.flatMap((m) => {
+    const parts = m.parts.filter((x) => {
+      const t = x as { toolCallId?: string; state?: string };
+      return !(t.toolCallId?.startsWith(DIRECT) && !t.state?.startsWith('output-'));
+    });
+    return parts.some((x) => x.type !== 'step-start') ? [{ ...m, parts }] : [];
+  });
+}
 
 /** The page the person is on, as the panel sent it; anything malformed counts as the workspace. */
 export function readContext(raw: unknown): AssistantContext {

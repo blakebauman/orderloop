@@ -10,6 +10,7 @@ import {
   ASSISTANT_TOOLS,
   type Attention,
   atLeast,
+  DIRECT_CALL,
   isAssistantTool,
   ROLE_LABELS,
 } from '@orderloop/core';
@@ -114,14 +115,14 @@ import {
  * Reduced motion shows and hides both at once.
  */
 export function AssistantPanel() {
-  const { open, setOpen } = useAssistant();
+  const { open, setOpen, acts } = useAssistant();
   const [opened, setOpened] = useState(false);
   // As a sheet, it keeps its composer above the on-screen keyboard.
   const wide = useMedia(WIDE);
   useVisualViewport(open && !wide);
   useEffect(() => {
-    if (open) setOpened(true);
-  }, [open]);
+    if (open || acts.length) setOpened(true);
+  }, [open, acts.length]);
   return (
     <aside
       aria-label="Assistant"
@@ -276,7 +277,7 @@ function PanelHeader({ onClear, canClear }: { onClear?: () => void; canClear?: b
   );
 }
 
-type Meta = { source?: 'model' | 'heuristic' };
+type Meta = { source?: 'model' | 'heuristic' | 'direct' };
 type Message = UIMessage<Meta>;
 
 function Conversation() {
@@ -332,10 +333,37 @@ function Conversation() {
       agent.call('preview', [tool, input, callId]) as Promise<ActionPreview>,
     [agent],
   );
+  // A card a page made (`act`) is answered here, with no model turn; a model's card as the SDK does.
+  const latest = useRef(a);
+  latest.current = a;
   const respond = useCallback(
-    (id: string, approved: boolean) => addToolApprovalResponse({ id, approved }),
-    [addToolApprovalResponse],
+    (id: string, approved: boolean) => {
+      if (!id.startsWith(DIRECT_CALL)) return addToolApprovalResponse({ id, approved });
+      (agent.call('resolve', [id, approved]) as Promise<{ output?: unknown }>)
+        .then((r) =>
+          latest.current.answered(id, approved ? { output: r.output } : { declined: true }),
+        )
+        .catch((e: unknown) => latest.current.answered(id, asError(e)));
+    },
+    [addToolApprovalResponse, agent],
   );
+
+  // Edits pages handed over: each is one tool call of its own, sent as the page built it.
+  useEffect(() => {
+    if (!a.acts.length) return;
+    for (const q of a.takeActs())
+      (
+        agent.call('act', [q.tool, q.input]) as Promise<{
+          callId: string;
+          waiting?: true;
+          output?: unknown;
+        }>
+      )
+        .then((r) =>
+          r.waiting ? latest.current.awaitAnswer(r.callId, q) : q.resolve({ output: r.output }),
+        )
+        .catch((e: unknown) => q.reject(asError(e)));
+  }, [a.acts, a.takeActs, agent]);
 
   // ── Messages written while a reply is running wait here, editable, until it ends.
   const [held, setHeld] = useState<string[]>([]);
@@ -420,6 +448,7 @@ function Conversation() {
                           i === lastAssistant &&
                           i === messages.length - 1 &&
                           i !== lastAction &&
+                          m.metadata?.source !== 'direct' &&
                           !busy
                             ? () => void regenerate()
                             : undefined
@@ -467,6 +496,8 @@ function Conversation() {
     </div>
   );
 }
+
+const asError = (e: unknown) => (e instanceof Error ? e : new Error(String(e)));
 
 const textOf = (m: Message) =>
   m.parts

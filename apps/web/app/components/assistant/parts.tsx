@@ -386,10 +386,12 @@ export function ReasoningLine({ text, running }: { text: string; running: boolea
 export type Previewer = (tool: string, input: unknown, callId: string) => Promise<ActionPreview>;
 
 const DESTRUCTIVE = (name: string, input: Record<string, unknown>) =>
-  name === 'cancel_order' || (name === 'decide_approval' && input.decision === 'rejected');
+  name === 'cancel_order' ||
+  ((name === 'decide_approval' || name === 'decide_approvals') && input.decision === 'rejected');
 
 const VERB: Record<string, (input: Record<string, unknown>) => string> = {
   decide_approval: (i) => (i.decision === 'rejected' ? 'Reject' : 'Approve'),
+  decide_approvals: (i) => (i.decision === 'rejected' ? 'Reject all' : 'Approve all'),
   deliver_event: () => 'Deliver event',
   cancel_order: () => 'Cancel order',
   submit_cart: () => 'Submit cart',

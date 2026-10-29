@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   type ApprovalContext,
   approvalContext,
-  batchProgress,
   byUrgency,
   cannotSelect,
   deadlineWords,
@@ -312,50 +311,8 @@ describe('cannotSelect', () => {
     const own = 'You started this order, so someone else must decide its approvals.';
     expect(cannotSelect({ ...can, refused: own })).toBe(own);
     expect(cannotSelect({ ...can, closed: true })).toMatch(/closed/);
-    // Held in its undo window, or sent: it can't be decided twice.
+    // Waiting on its card, or made: it can't be decided twice.
     expect(cannotSelect({ ...can, decided: true })).toMatch(/Already decided/);
-  });
-});
-
-describe('batchProgress', () => {
-  const held = { held: true, sent: false };
-  const undone = { held: false, sent: false };
-  const sent = (ok: boolean, error?: string) => ({
-    held: false,
-    sent: true,
-    result: { ok, error },
-  });
-
-  it('holds while any decision is in its undo window, and each row can be taken back alone', () => {
-    // Three approved together; the person undoes the second on its own row.
-    expect(batchProgress('approved', [held, undone, held])).toMatchObject({
-      phase: 'holding',
-      held: 2,
-    });
-    // The other two run out their windows and are sent; one is still being recorded.
-    expect(
-      batchProgress('approved', [sent(true), undone, { held: false, sent: true }]),
-    ).toMatchObject({ phase: 'sending' });
-    expect(batchProgress('approved', [sent(true), undone, sent(true)])).toEqual({
-      phase: 'done',
-      held: 0,
-      message: 'Approved 2. 1 taken back.',
-    });
-  });
-
-  it('says when Undo all took everything back, and nothing was sent', () => {
-    expect(batchProgress('rejected', [undone, undone]).message).toBe(
-      'Took back 2; nothing was sent.',
-    );
-  });
-
-  it('says what the order refused, row by row', () => {
-    expect(
-      batchProgress('rejected', [sent(true), sent(false, 'That node is not waiting')]).message,
-    ).toBe('Rejected 1. 1 not recorded: That node is not waiting.');
-    expect(batchProgress('approved', [sent(false, 'a'), sent(false, 'b')]).message).toBe(
-      '2 not recorded; each row says why.',
-    );
   });
 });
 

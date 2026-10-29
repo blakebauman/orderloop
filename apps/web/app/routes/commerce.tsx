@@ -22,15 +22,14 @@ import {
   Form,
   Link,
   type ShouldRevalidateFunctionArgs,
-  useActionData,
   useFetcher,
   useLoaderData,
-  useNavigation,
   useSearchParams,
 } from 'react-router';
 import { Ago, WaitingAt } from '~/components/ago';
 import { Empty, PageHeader, Section } from '~/components/page';
 import { ToneBadge } from '~/components/status';
+import { useAssistant } from '~/lib/assistant';
 import { requireUser } from '~/lib/auth.server';
 import { type CommercePage, commercePage } from '~/lib/commerce.server';
 import { type Paged, pageHref, pricesKey, shown, storeKey } from '~/lib/commerce-pages';
@@ -123,16 +122,7 @@ export async function action({ request }: Route.ActionArgs) {
   // An admin's, refused for anyone else (`updateProductIndex`).
   if ((await request.formData()).get('intent') === 'product-index')
     return { productIndex: await updateProductIndex(request, me) };
-  try {
-    await engine().runReplenish();
-    return { started: true as const };
-  } catch (err) {
-    console.error('stock review failed to start', err);
-    return {
-      started: false as const,
-      error: 'Could not start the stock review. Nothing was ordered; try again in a moment.',
-    };
-  }
+  return null;
 }
 
 /**
@@ -175,17 +165,28 @@ export default function Commerce() {
   const events = allEvents.filter(
     (e) => !term || [e.title, e.customer, e.orderId].some((x) => x?.toLowerCase().includes(term)),
   );
-  const answered = useActionData<typeof action>();
-  const review = answered && 'started' in answered ? answered : undefined;
-  const nav = useNavigation();
+  // The stock review runs through the assistant: its card says what it starts, and the person
+  // confirms it there.
+  const { act } = useAssistant();
+  const [review, setReview] = useState<{ started: true } | { started: false; error: string }>();
+  const [reviewing, setReviewing] = useState(false);
+  const runReview = async () => {
+    setReviewing(true);
+    try {
+      const r = await act('run_stock_review', {});
+      setReview('declined' in r ? undefined : { started: true });
+    } catch (err) {
+      setReview({ started: false, error: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setReviewing(false);
+    }
+  };
   const canOperate = useCan('operator');
   const canAdmin = useCan('admin');
   const [recorded, setRecorded] = useState<ReadonlySet<string>>(new Set());
   const open = events.filter((e) => !recorded.has(eventKey(e))).length;
   // More orders wait on an outside event than the page read.
   const partial = waitingTotal > shownOrders;
-  // The stock review is the only form on this page that navigates.
-  const reviewing = nav.state === 'submitting';
   return (
     <>
       <PageHeader
@@ -389,12 +390,15 @@ export default function Commerce() {
             <>
               <Total list={inventory} noun="item" />
               {canOperate ? (
-                <Form method="post" preventScrollReset>
-                  <Button type="submit" size="sm" variant="outline" disabled={reviewing}>
-                    <RefreshCw aria-hidden="true" />
-                    {reviewing ? 'Starting review…' : 'Run stock review now'}
-                  </Button>
-                </Form>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={reviewing}
+                  onClick={() => void runReview()}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  {reviewing ? 'Confirm it in the assistant' : 'Run stock review now'}
+                </Button>
               ) : null}
             </>
           }

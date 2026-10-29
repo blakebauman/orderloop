@@ -238,7 +238,10 @@ describe('MCP', () => {
     });
     expect(viewer.every((t) => t.outputSchema)).toBe(true);
     const operator = await tools(person('operator', 'ops@example.com'));
-    expect(operator).toHaveLength(19);
+    expect(operator).toHaveLength(20);
+    expect(operator.find((t) => t.name === 'decide_approvals')).toMatchObject({
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true },
+    });
     expect(operator.find((t) => t.name === 'cancel_order')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: true },
     });
@@ -260,7 +263,7 @@ describe('MCP', () => {
       inputSchema: { properties: { cartId: {}, confirmation: {} } },
     });
     const admin = await tools(person('admin', 'ann@example.com'));
-    expect(admin).toHaveLength(20);
+    expect(admin).toHaveLength(21);
     expect(admin.find((t) => t.name === 'draft_plugin')).toMatchObject({
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
       outputSchema: { type: 'object', properties: { id: {}, cases: {}, href: {} } },

@@ -1,20 +1,16 @@
 import type { BusinessAuditAction } from '@orderloop/core';
 import { data } from 'react-router';
 import { audit } from '~/lib/audit.server';
-import { actor, requireUser } from '~/lib/auth.server';
+import { requireUser } from '~/lib/auth.server';
 import { engine } from '~/lib/env.server';
-import { decider, signedActor } from '~/lib/principal.server';
 import type { Route } from './+types/order-action';
 
-/** Form posts from pages without a live agent connection (approvals inbox, Commerce). */
+/** Form posts from pages without a live agent connection (Commerce, restarting an order). */
 export async function action({ request, params }: Route.ActionArgs) {
   const f = await request.formData();
   const intent = String(f.get('intent'));
-  // Deciding needs approver; delivering events, restarting and cancelling need operator.
-  const me = await requireUser(
-    request,
-    intent === 'approve' || intent === 'reject' ? 'approver' : 'operator',
-  );
+  // Delivering events and restarting need operator. Decisions go through the assistant.
+  const me = await requireUser(request, 'operator');
   const record = (action: BusinessAuditAction, detail: Record<string, unknown>, target?: string) =>
     audit(request, action, {
       actor: me,
@@ -22,43 +18,6 @@ export async function action({ request, params }: Route.ActionArgs) {
       detail: { ...detail, via: 'app' },
     });
   try {
-    if (intent === 'approve' || intent === 'reject') {
-      const nodeId = String(f.get('nodeId'));
-      const decision = intent === 'approve' ? 'approved' : 'rejected';
-      const note = String(f.get('note') ?? '') || undefined;
-      const res = await engine().decide(
-        params.orderId,
-        nodeId,
-        decision,
-        await signedActor(decider(me, actor(me)), `decide:${params.orderId}`),
-        note,
-      );
-      if (!res.ok)
-        return data(
-          {
-            ok: false,
-            error:
-              res.reason === 'own_order' || res.reason === 'forbidden'
-                ? res.error
-                : res.reason === 'not_found'
-                  ? 'That order no longer exists'
-                  : res.reason === 'no_run'
-                    ? 'No live run for this order, so it can’t be decided.'
-                    : 'That step is no longer waiting for a decision',
-          },
-          {
-            status: {
-              own_order: 403,
-              forbidden: 403,
-              not_found: 404,
-              no_run: 409,
-              not_waiting: 409,
-            }[res.reason],
-          },
-        );
-      await record('approval.decided', { nodeId, decision, ...(note ? { note } : {}) });
-      return { ok: true };
-    }
     if (intent === 'event') {
       const event = String(f.get('event'));
       const res = await engine().sendEvent(params.orderId, event, { source: 'commerce' });

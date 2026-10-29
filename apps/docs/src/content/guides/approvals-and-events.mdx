@@ -31,14 +31,15 @@ for example a second approval for a more senior assignee.
 
 ### Deciding
 
-From the **order page** or the **approvals inbox** (`/approvals`), each decision has a note field
-and a 5-second undo window. Nothing is sent until the window closes, so **Undo** is real: the
-order never hears about a decision that was taken back. If you leave the page during the
-window, the pending decision is sent then.
+From the **order page** or the **approvals inbox** (`/approvals`), each decision has a note field.
+**Approve** and **Reject** go through the [assistant](/guides/assistant/#edits-from-a-page). They
+open its confirm card, which shows the order, its total, where the decision leads and your note.
+Nothing is recorded until you confirm there, and **Not now** leaves the approval waiting. While the
+card waits, the row says "Confirm it in the assistant".
 
 Decisions close two seconds before the approval times out, so the last one still arrives in time,
 and the countdown counts to that moment. Ten seconds before, it reads "Decisions close in …" (and
-screen readers hear it once); within five seconds the undo window shortens to fit. On the order
+screen readers hear it once). On the order
 page, when decisions close the buttons stay in place but disabled, any note is kept, and the card
 says where the order is going: "Decisions are closed; the order is going to Decline order". In the
 inbox, an approval whose decisions have closed leaves the queue for one folded line under it, "2
@@ -77,17 +78,16 @@ arrives, the new one takes the old row's place.
 ### Deciding several at once
 
 In a group of two or more approvals you can decide, tick rows (or **Select all in this group**) and
-press **Approve selected** or **Reject selected**. A batch never reaches past its group. Each ticked
-row gets its own decision with its own 5-second undo window, exactly as if you had pressed its
-button: its own note, if you typed one, and its own **Undo**. While any of them is held,
-**Undo all** takes back the rest; nothing is sent for a decision taken back. Rows you can't decide
-(the order has no live run, or you started the order and approvals are separated) have no
-checkbox, and say why in place of their buttons. When the batch is done, screen readers hear one
-line, such as "Approved 3. 1 taken back."
+press **Approve selected** or **Reject selected**. A batch never reaches past its group. The whole
+batch is one confirm card in the assistant (`decide_approvals`), which lists each approval it
+decides and any it will skip, with the reason. Once you confirm, each approval is decided on its own,
+with its own checks and its own audit record, so one that can't be decided doesn't stop the rest.
+Rows you can't decide (the order has no live run, or you started the order and approvals are
+separated) have no checkbox, and say why in place of their buttons. When the batch is done, screen
+readers hear one line, such as "Approved 3. 1 not recorded; each row says why."
 
-Keyboard: `j`/`k` (or the arrow keys) move between rows across groups, `a` approves, `r` rejects,
-`z` undoes, and `x` (or space on a row) ticks a row for its group's batch. With **Undo all**
-focused, `z` takes back the whole batch.
+Keyboard: `j`/`k` (or the arrow keys) move between rows across groups, `a` approves, `r` rejects
+(each opens the card), and `x` (or space on a row) ticks a row for its group's batch.
 
 The pending queue, the count on **Approvals** in the navigation and the overview's **Needs a
 decision** hold only approvals a decision can resume. An order that was recorded in the orders
@@ -119,8 +119,7 @@ curl -X POST https://orderloop.app/api/v1/orders/ord_…/approvals/approval \
 `That node is not waiting for an approval`, and one on an order the caller started, with separation on, fails with `403`. See the [REST API](/reference/rest-api/).
 
 The [assistant](/guides/assistant/) can decide an approval for an `approver`, but only after the
-person confirms a card showing the order and where each decision leads (the card is blocked, with the reason, when the person started the order and approvals are separated). There is no undo window
-for a decision made there, and the decision is recorded `by` `<email> via assistant`.
+person confirms a card showing the order and where each decision leads (the card is blocked, with the reason, when the person started the order and approvals are separated). The decision is recorded `by` `<email> via assistant`.
 
 ## Waiting for events
 

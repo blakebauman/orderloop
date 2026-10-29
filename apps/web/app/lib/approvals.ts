@@ -162,7 +162,7 @@ export type RowStanding = {
   noRun?: boolean;
   /** Decisions on it have closed (its step is about to time out). */
   closed?: boolean;
-  /** A decision on it is in its undo window, or has been sent. */
+  /** A decision on it waits on its card in the assistant, or has been made. */
   decided?: boolean;
 };
 
@@ -178,42 +178,6 @@ export function cannotSelect(s: RowStanding): string | null {
   if (s.closed) return 'Decisions are closed.';
   if (s.decided) return 'Already decided.';
   return null;
-}
-
-/** One row of a batch: still in its undo window, sent, and what the order said back. */
-export type BatchRow = { held: boolean; sent: boolean; result?: { ok: boolean; error?: string } };
-
-export type BatchProgress = {
-  /** Holding: some decisions are in their undo windows. Sending: all sent, not all answered. */
-  phase: 'holding' | 'sending' | 'done';
-  held: number;
-  /** What to say once it is done, e.g. "Approved 3. 1 taken back." */
-  message: string;
-};
-
-/**
- * Where a batch stands. Each of its rows is its own held decision, so each can be taken back on its
- * own: a row that is neither held nor sent was undone. The message is said once, when it's done.
- */
-export function batchProgress(decision: 'approved' | 'rejected', rows: BatchRow[]): BatchProgress {
-  const held = rows.filter((r) => r.held).length;
-  if (held) return { phase: 'holding', held, message: '' };
-  const sent = rows.filter((r) => r.sent);
-  if (sent.some((r) => !r.result)) return { phase: 'sending', held: 0, message: '' };
-  const ok = sent.filter((r) => r.result?.ok).length;
-  const refused = sent.filter((r) => !r.result?.ok);
-  const undone = rows.length - sent.length;
-  const verb = decision === 'approved' ? 'Approved' : 'Rejected';
-  if (!sent.length)
-    return { phase: 'done', held: 0, message: `Took back ${undone}; nothing was sent.` };
-  const parts = [
-    ok ? `${verb} ${ok}.` : '',
-    undone ? `${undone} taken back.` : '',
-    refused.length
-      ? `${refused.length} not recorded${refused.length === 1 && refused[0]!.result?.error ? `: ${refused[0]!.result.error}` : '; each row says why'}.`
-      : '',
-  ];
-  return { phase: 'done', held: 0, message: parts.filter(Boolean).join(' ') };
 }
 
 /** How a row's deadline reads, deadline first: closed, closing now, soon, or at a time of day. */

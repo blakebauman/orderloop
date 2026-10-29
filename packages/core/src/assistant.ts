@@ -60,6 +60,7 @@ export type AssistantTool =
   | 'create_cart'
   | 'change_cart'
   | 'decide_approval'
+  | 'decide_approvals'
   | 'deliver_event'
   | 'cancel_order'
   | 'submit_cart'
@@ -194,6 +195,14 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Decide an approval',
     description: 'Approve or reject an approval an order is waiting on.',
   },
+  decide_approvals: {
+    role: 'approver',
+    confirm: true,
+    label: 'Decide approvals',
+    title: 'Decide several approvals',
+    description:
+      'Approve or reject up to 25 open approvals at once, with one note for all. Each is checked and decided on its own; one that can’t be decided is skipped and says why.',
+  },
   deliver_event: {
     role: 'operator',
     confirm: true,
@@ -233,6 +242,12 @@ export const ASSISTANT_TOOLS: Record<
       'Run the daily stock review now; it starts reorders for SKUs at or below their reorder point.',
   },
 };
+
+/**
+ * The id prefix of a tool call a page made through the assistant (`act`), with no model: the panel
+ * answers its confirm card with `resolve`, not as a model's approval.
+ */
+export const DIRECT_CALL = 'direct_';
 
 export const isAssistantTool = (name: string): name is AssistantTool => name in ASSISTANT_TOOLS;
 

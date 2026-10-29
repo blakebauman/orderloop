@@ -160,6 +160,7 @@ export async function changeCart(
   cartId: string,
   ops: CartOp[],
   channel: Channel,
+  direct?: boolean,
 ) {
   const c = await loadCart(env, cartId);
   const actor = staffCartActor(p);
@@ -174,7 +175,12 @@ export async function changeCart(
     await recordAudit(env, 'cart.changed', {
       actor: p,
       target: c.id,
-      detail: { op: op.op, via: AUDIT_CHANNEL[channel], tool: 'change_cart' },
+      detail: {
+        op: op.op,
+        via: AUDIT_CHANNEL[channel],
+        tool: 'change_cart',
+        ...(direct ? { direct: true } : {}),
+      },
     });
   }
   return { ...(await getCart(env, c.id)), applied };

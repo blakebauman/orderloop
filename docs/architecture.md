@@ -187,6 +187,37 @@ the principal, the tool, `fingerprintOf({ tool, input })`, unused and within
 `pruneConfirmations`. A2A typed skills and `place_order` call `runTool` directly (the caller composed
 the call, as with REST, `confirmed: 'direct'`); A2A chat has its own `{ confirm }`.
 
+Pages edit through the panel's `AssistantAgent` too, with no model. `useAssistant().act(tool, input)`
+in `apps/web/app/lib/assistant.tsx` queues the call. The panel mounts, closed, while calls are
+queued, and sends each to `@callable act`. That method checks the role (`requireRole`), parses the
+input with `TOOL_INPUTS`, and persists one assistant message holding one tool part. The part's
+`toolCallId` starts with `DIRECT_CALL` (`direct_`) and its metadata `source` is `direct`.
+
+- **A confirm tool** is persisted as `approval-requested`. The panel's `ActionCard` previews it
+  (`shown` hold) as usual. Its answer goes to `@callable resolve(callId, approved)` rather than
+  `addToolApprovalResponse`. `resolve` runs `runTool` with the hold it uses up, writes the outcome
+  into the part and never starts a model turn. A second answer, from another tab, is refused
+  (`resolving`, plus a state check).
+- **Any other tool** runs at once and is persisted with its output or error.
+
+`act` also records `direct:<callId>` (the tool and the digest of its parsed input) for each confirm
+card. `resolve` requires that record, re-parses the part's input and checks the digest, so a part
+that a browser wrote into the conversation through ai-chat's `messages` event runs nothing. The
+card stays `approval-requested` while its action runs, so ai-chat's `repairInterruptedToolPart`
+never marks it "approved but did not run".
+
+What is persisted is cut to what the line needs:
+- a no-confirm call's input keeps only its `…Id` fields (`idsOf`);
+- a result keeps `done`, `href`, ids, `status`, counts and per-row `results` (`kept`);
+- an error keeps a `Refused` message, or a generic line otherwise (`errorLine`).
+
+The page still gets the full result. `runTool(…, { direct: true })` adds `direct: true` to the
+audit trail. `answeredOnly` leaves a direct card that is still waiting out of what the model reads.
+
+Approval decisions go through these cards too, including the inbox's batch, as one
+`decide_approvals` card that runs `decide_approval` for each row. Recorded outside events on
+Commerce still use their undo window.
+
 A preview can also carry `bound`: what the person is shown that can change before they confirm
 (for `submit_cart`, `{ cartVersion }`, since `change_cart` needs no confirm). The channel that
 showed the preview keeps it and strips it from what it sends: MCP in the code's `bound` column

@@ -63,6 +63,7 @@ import { Link } from 'react-router';
 import { Ago } from '~/components/ago';
 import { Confirm } from '~/components/confirm';
 import { Body, Empty, PageHeader, Section } from '~/components/page';
+import { useAssistantIfAny } from '~/lib/assistant';
 import { type CartTicks, keepTicks, NO_TICKS, tick, tickAll, ticked } from '~/lib/cart-ticks';
 import {
   NO_TYPISTS,
@@ -159,7 +160,29 @@ export function CartView({
       setBusy(false);
     }
   }
-  const apply = (op: CartOp) => call<Result>('apply', [op]);
+  // Staff edit through the assistant, as its own tool calls (a submit stops at its confirm card);
+  // the buyer, who has no assistant, calls the cart directly.
+  const assistant = useAssistantIfAny();
+  async function viaAssistant(tool: 'change_cart' | 'submit_cart', input: unknown) {
+    setBusy(true);
+    setError(null);
+    try {
+      await assistant!.act(tool, input);
+      return { ok: true } as const;
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      setError(error);
+      return { ok: false, error } as const;
+    } finally {
+      setBusy(false);
+    }
+  }
+  const apply = (op: CartOp): Promise<Result | null> =>
+    guest || !assistant
+      ? call<Result>('apply', [op])
+      : viaAssistant('change_cart', { cartId: cart.id, ops: [op] });
+  const submit = () =>
+    guest || !assistant ? call('submit') : viaAssistant('submit_cart', { cartId: cart.id });
 
   const final = isFinalCart(cart);
   const editable = editableAs(cart);
@@ -256,7 +279,7 @@ export function CartView({
                 size="sm"
                 disabled={busy || !!ready || !!cart.external}
                 title={ready ?? undefined}
-                onClick={() => void call('submit')}
+                onClick={() => void submit()}
               >
                 Submit as order
               </Button>

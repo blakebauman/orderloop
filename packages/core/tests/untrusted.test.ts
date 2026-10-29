@@ -81,6 +81,8 @@ describe('boundExtractedLines', () => {
 describe('boundText and clampNumber', () => {
   it('strips control characters, trims, cuts and nulls empties', () => {
     expect(boundText(' PO\n123\u0000 ', 64)).toBe('PO 123');
+    // Bidi overrides and zero-widths would make a card read other than what it sends.
+    expect(boundText('pay\u202Eevil\u200B ', 64)).toBe('payevil');
     expect(boundText('x'.repeat(100), 10)).toBe('x'.repeat(10));
     expect(boundText('   ', 10)).toBeNull();
     expect(boundText(42, 10)).toBeNull();
