@@ -381,6 +381,21 @@ export function ReasoningLine({ text, running }: { text: string; running: boolea
   );
 }
 
+/**
+ * A model's turn that ended with nothing to show: thinking and reads, then no answer. Kimi has
+ * stopped after thinking "let me look at that flow" without looking. Answer again asks once more.
+ */
+export function NoAnswerLine() {
+  return (
+    <TraceLine status="error">
+      <TraceIcon>
+        <CircleAlert />
+      </TraceIcon>
+      <TraceTitle>Stopped without an answer</TraceTitle>
+    </TraceLine>
+  );
+}
+
 // ── Actions that wait for a person ─────────────────────────────────────────
 
 /** `callId` is the tool call the card is for: the engine holds the confirm to what this card showed. */
