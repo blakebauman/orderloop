@@ -88,6 +88,11 @@ export const orders = sqliteTable(
     startedBy: text('started_by'),
     /** When a data subject erasure removed the buyer from it. */
     erasedAt: integer('erased_at'),
+    /**
+     * 1 while the customer's addresses haven't counted its ship-to: set by migration 0063 on
+     * orders started before the first address was kept, cleared by the daily sweep (`backfillAddresses`).
+     */
+    addressPending: integer('address_pending'),
   },
   (t) => [
     index('orders_status').on(t.status, t.updatedAt),
@@ -100,6 +105,9 @@ export const orders = sqliteTable(
     uniqueIndex('orders_idempotency')
       .on(t.idempotencyKey)
       .where(sql`${t.idempotencyKey} IS NOT NULL`),
+    index('orders_address_pending')
+      .on(t.addressPending)
+      .where(sql`${t.addressPending} IS NOT NULL`),
   ],
 );
 

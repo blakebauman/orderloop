@@ -5,7 +5,8 @@
  * (`AUDIT_RETENTION_DAYS`, 400 days unless set) are archived to R2 first, then deleted. Where a
  * deployment sets `PERSONAL_DATA_RETENTION_DAYS`, orders finished longer ago than that lose their
  * buyer's personal data, as an erasure request would remove it (`eraseOrders`); the commercial
- * record stays, and the customer addresses last shipped to before then are deleted. Stored
+ * record stays, and the customer addresses last shipped to before then are deleted. Orders started before customer
+ * addresses were kept add theirs (`backfillAddresses`). Stored
  * secrets are resealed under the current `DATA_KEY` (`resealSecrets`).
  */
 
@@ -32,6 +33,7 @@ import {
 } from '@orderloop/db';
 import { and, asc, eq, inArray, isNotNull, isNull, lt, lte, ne, or } from 'drizzle-orm';
 import { pruneConfirmations } from './confirmations';
+import { backfillAddresses } from './customer-addresses';
 import { resealSecrets } from './data-key';
 import { cartAgent } from './namespaces';
 import { eraseIfErased, eraseOrders } from './subjects';
@@ -116,6 +118,7 @@ export async function sweep(env: Env, now = Date.now()) {
     cartBuyersIndexed: await indexCartBuyers(env),
     personalDataErased: await expirePersonalData(env, now),
     addressesExpired: await expireAddresses(env, now),
+    addressesBackfilled: await backfillAddresses(env, now),
     confirmations: await pruneConfirmations(env, now),
     aiUsageDays: await pruneUsage(env, now),
     secrets: await resealSecrets(env),
