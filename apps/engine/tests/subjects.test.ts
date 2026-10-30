@@ -10,11 +10,11 @@ import {
   messages,
   orders,
 } from '@orderloop/db';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createCart } from '../src/cart/carts';
 import { storeDocument } from '../src/connectors';
-import { rememberAddress } from '../src/customer-addresses';
+import { backfillAddresses, rememberAddress } from '../src/customer-addresses';
 import { ensureTemplates } from '../src/flows';
 import { startOrder } from '../src/orders';
 import { expireAddresses, expirePersonalData } from '../src/retention';
@@ -275,6 +275,69 @@ describe('data subject requests', () => {
         lastOrderId: 'ord_a2',
       },
     ]);
+  });
+
+  it('adds the ship-to of orders started before addresses were kept, dated by the order', async () => {
+    introspector = await introspectWorkflow(env.ORDER_LOOP);
+    await introspector.modifyAll(async (m) => {
+      await m.disableSleeps();
+      await m.disableRetryDelays();
+    });
+    await db()
+      .insert(customers)
+      .values([
+        { id: 'cus_bf', name: 'Backfill Co', email: 'bf@example.com' },
+        { id: 'cus_bf_gone', name: 'Erased customer', email: 'erased-cus_bf_gone@erased.invalid' },
+      ]);
+    const dock = { line1: '4 Dock Rd', city: 'Leeds', postalCode: 'LS1 4AP', country: 'GB' };
+    const first = await finished(
+      order({ customerId: 'cus_bf', meta: { shipTo: { ...dock, name: 'Ann' } } }),
+    );
+    const second = await finished(
+      order({ customerId: 'cus_bf', meta: { shipTo: { ...dock, name: 'Bo' } } }),
+    );
+    const noShipTo = await finished(order({ customerId: 'cus_bf' }));
+    const gone = await finished(order({ customerId: 'cus_bf_gone', meta: { shipTo: dock } }));
+    const marked = [first, second, noShipTo, gone];
+    // As before customer addresses: none kept, the orders marked. One order since was counted.
+    await db()
+      .delete(customerAddresses)
+      .where(inArray(customerAddresses.customerId, ['cus_bf', 'cus_bf_gone']));
+    await db().update(orders).set({ addressPending: 1 }).where(inArray(orders.id, marked));
+    const later = Date.now() + 60_000;
+    await rememberAddress(db(), {
+      id: 'ord_since',
+      customerId: 'cus_bf',
+      shipTo: { ...dock, name: 'Cy' },
+      at: later,
+    });
+
+    expect(await backfillAddresses(env)).toBe(4);
+    const firstRow = await db().select().from(orders).where(eq(orders.id, first)).get();
+    expect(
+      await db().select().from(customerAddresses).where(eq(customerAddresses.customerId, 'cus_bf')),
+    ).toMatchObject([
+      {
+        name: 'Cy',
+        line1: '4 Dock Rd',
+        orders: 3,
+        firstUsedAt: firstRow!.createdAt,
+        lastUsedAt: later,
+        lastOrderId: 'ord_since',
+      },
+    ]);
+    expect(
+      await db()
+        .select()
+        .from(customerAddresses)
+        .where(eq(customerAddresses.customerId, 'cus_bf_gone')),
+    ).toEqual([]);
+    const marks = await db()
+      .select({ p: orders.addressPending })
+      .from(orders)
+      .where(inArray(orders.id, marked));
+    expect(marks).toEqual(marked.map(() => ({ p: null })));
+    expect(await backfillAddresses(env)).toBe(0);
   });
 
   it('forgets addresses last shipped to before the personal data retention', async () => {

@@ -283,3 +283,44 @@ describe('0058_products_search', () => {
     await consistent();
   });
 });
+
+describe('0063_order_address_backfill', () => {
+  it('marks the customer orders started before the first address was kept, and only those', async () => {
+    const db = testEnv.MIGRATION_DB;
+    const { applied, next } = before('0063_');
+    await applyD1Migrations(db, applied);
+    // The first address kept, at a known time; orders either side of it.
+    const at = Date.parse('2026-10-29T20:40:00Z');
+    await db
+      .prepare(
+        `INSERT INTO customer_addresses (id, customer_id, key, line1, city, postal_code, country, first_used_at, last_used_at, last_order_id)
+         VALUES ('adr_1', 'cus_1', 'k', '1 Main St', 'Leeds', 'LS1', 'GB', ?, ?, 'a-after')`,
+      )
+      .bind(at, at)
+      .run();
+    const order = (id: string, customer: string | null, created: number, erased: number | null) =>
+      db
+        .prepare(
+          `INSERT INTO orders (id, model, status, flow_id, flow_version, customer_id, created_at, updated_at, erased_at)
+           VALUES (?, 'b2b', 'completed', 'f', 1, ?, ?, ?, ?)`,
+        )
+        .bind(id, customer, created, created, erased);
+    await db.batch([
+      order('a-before', 'cus_1', at - 1000, null),
+      order('a-after', 'cus_1', at + 1000, null),
+      order('a-guest', null, at - 1000, null),
+      order('a-erased', 'cus_1', at - 1000, at),
+    ]);
+    await applyD1Migrations(db, [next]);
+
+    const rows = await db
+      .prepare("SELECT id, address_pending FROM orders WHERE id LIKE 'a-%' ORDER BY id")
+      .all();
+    expect(rows.results).toEqual([
+      { id: 'a-after', address_pending: null },
+      { id: 'a-before', address_pending: 1 },
+      { id: 'a-erased', address_pending: null },
+      { id: 'a-guest', address_pending: null },
+    ]);
+  });
+});
