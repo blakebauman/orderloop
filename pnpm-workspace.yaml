@@ -8,15 +8,15 @@ packages:
 # A dependency used by exactly one package keeps its version in that package.json.
 catalog:
   # React
-  react: ^19.2.8
-  react-dom: ^19.2.8
+  react: ^19.3.1
+  react-dom: ^19.3.1
   '@types/react': ^19.2.0
   '@types/react-dom': ^19.2.0
 
   # shadcn/ui primitives (shared by packages/ui and apps/web)
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
-  lucide-react: ^1.58.0
+  lucide-react: ^1.65.0
   radix-ui: ^1.6.0
   tailwind-merge: ^3.0.2
   recharts: ^3.10.1
@@ -34,8 +34,8 @@ catalog:
   agents: ^0.30.1
   '@cloudflare/ai-chat': 0.12.2
   ai: 7.0.139
-  '@ai-sdk/react': 4.0.142
-  '@ai-sdk/provider': 4.0.27
+  '@ai-sdk/react': 4.0.161
+  '@ai-sdk/provider': 4.0.34
   streamdown: 2.7.0
   # The assistant panel's Message Scroller (components/ai-elements/message-scroller.tsx).
   '@shadcn/react': 0.3.1
@@ -45,12 +45,12 @@ catalog:
   # Build toolchain
   typescript: ^6.0.3
   vitest: 5.0.3
-  vite: ^8.0.12
+  vite: ^8.3.5
 
   # Cloudflare
-  wrangler: ^4.149.0
-  '@cloudflare/workers-types': ^5.20261009.1
-  '@cloudflare/vitest-plugin': ^1.4.0
+  wrangler: ^4.156.0
+  '@cloudflare/workers-types': ^5.20261030.1
+  '@cloudflare/vitest-plugin': ^1.4.11
 
 overrides:
   # GHSA: quadratic selector parsing (< 7.1.6). Starlight → expressive-code → postcss-nested@6
