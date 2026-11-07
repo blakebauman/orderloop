@@ -7,7 +7,7 @@
  *   ORDERLOOP_API_TOKEN=ol_… node scripts/catalog-bench.ts <deployment id> [products] [--keep]
  *   ORDERLOOP_API_TOKEN=ol_… node scripts/catalog-bench.ts <deployment id> --cleanup [products]
  *
- * `products` defaults to 50,000. The token must be an operator's or an admin's. Everything it
+ * `products` defaults to 25,000. The token must be an operator's or an admin's. Everything it
  * writes is in its own channel (`bench`), type (`bench-apparel`) and categories (`bench-*`), with
  * keys `bench-0000000` up, so it never touches a storefront's catalog. `--keep` leaves the products
  * in place; `--cleanup` only deletes them (after a run that was stopped). The channel, type and
@@ -347,7 +347,7 @@ async function cleanup() {
 async function main() {
   const args = process.argv.slice(2);
   id = args.find((a) => !a.startsWith('--') && !/^\d+$/.test(a)) ?? '';
-  count = Number(args.find((a) => /^\d+$/.test(a)) ?? 50_000);
+  count = Number(args.find((a) => /^\d+$/.test(a)) ?? 25_000);
   const keep = args.includes('--keep');
   const cleanupOnly = args.includes('--cleanup');
   if (!id) fail('usage: catalog-bench.ts <deployment id> [products] [--keep | --cleanup]');

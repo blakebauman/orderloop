@@ -530,6 +530,23 @@ shortens its rules on the next run. Each bucket's `lock set` replaces that bucke
 configuration, so a rule added by hand is dropped. List the rules with
 `wrangler r2 bucket lock list orderloop-docs<suffix>` (or `orderloop-catalog<suffix>`).
 
+## The bench deployment
+
+`bench` (`deployments/bench.jsonc`, at `bench.orderloop.app`) is a throwaway deployment for
+catalog benchmarks and scale tests ([Catalog benchmark](testing.md#catalog-benchmark)), so they
+never write to `orderloop`'s catalog or its bill. It holds no customer data, takes mocked payments
+and installs no plugins. To bring it up:
+
+1. Run `./scripts/provision.sh bench`. It writes `d1Id` and `catalogKvId` into the file.
+2. Commit the ids and remove `"hold": true` in the same change, then merge. CI deploys it in the
+   `internal` ring.
+3. Open `https://bench.orderloop.app/setup` with the code from `.secrets/bench/setup-code`, then
+   create an operator token for `ORDERLOOP_API_TOKEN`.
+
+Its idle cost is close to nothing (every resource is billed by use). A run's cost is in its Durable
+Object rows written: at the shape the benchmark generates, plan on roughly 200 rows a product,
+counting the import and the delete.
+
 ## The demo
 
 `demo.orderloop.app` is a public demo, the `demo` deployment, with `"demo": true` in its

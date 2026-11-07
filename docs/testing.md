@@ -530,12 +530,17 @@ CI runs it in the verify job.
 `scripts/catalog-bench.ts` (`pnpm catalog:bench <deployment> [products]`) measures a deployed catalog
 end to end through its REST API and public catalog, with an operator's or admin's token in
 `ORDERLOOP_API_TOKEN`. It is run by hand, after a deploy that changes publishing, listings or search,
-never in CI. It:
+never in CI. Run it against the `bench` deployment (`pnpm catalog:bench bench`,
+[The bench deployment](operations.md#the-bench-deployment)), not `orderloop`: a product costs roughly 200
+Durable Object rows written across its shard, listing indexers and search shards, counting its
+import and its delete. The 1,000,000-product run below wrote about 237 million rows on production in two
+days, about $187 over the account's 50 million included. 25,000 products is enough to compare
+changes; go larger only when the question is about scale itself. It:
 
 1. saves its own channel `bench` (one locale, `en`), type `bench-apparel` (`material`, `color`, and
    `size` as the variant axis) and categories (`bench-shop` with five leaves), so it never touches a
    storefront's catalog;
-2. streams a generated CSV feed of N products (50,000 by default, two variants each, keys
+2. streams a generated CSV feed of N products (25,000 by default, two variants each, keys
    `bench-0000000` up, seeded so every run sends the same feed) as it generates it;
 3. polls the feed and the root listing's `total` every 5 seconds (each poll a different page size,
    so it isn't a cached copy) until the import is done and every product is listed;
