@@ -37,6 +37,14 @@ class Builder {
   }
 }
 
+/** A return's amount, or the order total when it names none. Never `or`: a zero isn't "all". */
+const returnAmount = {
+  if: [
+    { '==': [{ var: 'vars.return_requested.amount' }, null] },
+    { var: 'order.total' },
+    { var: 'vars.return_requested.amount' },
+  ],
+};
 const gt = (path: string, n: number) => ({ '>': [{ var: path }, n] });
 
 export function purchaseRequestFlow(): Flow {
@@ -459,6 +467,10 @@ export function storefrontOrderFlow(): Flow {
         event: 'return.requested',
         timeout: '30 days',
       })
+      .n('goods_back', 'control.condition', 'Goods coming back?', {
+        // Only a claim with nothing to send back says false; anything else takes the label.
+        expression: { '!==': [{ var: 'vars.return_requested.goodsBack' }, false] },
+      })
       .n('rma', 'commerce.return_label', 'Return label', { carrier: 'ups' })
       .n('send_label', 'commerce.notify', 'Send return label', {
         to: 'customer',
@@ -474,7 +486,7 @@ export function storefrontOrderFlow(): Flow {
       })
       // A partial refund comes from the return request's payload; the connector caps it.
       .n('refund', 'commerce.refund', 'Refund', {
-        amount: { or: [{ var: 'vars.return_requested.amount' }, { var: 'order.total' }] },
+        amount: returnAmount,
         reason: '{{vars.return_requested.reason}}',
       })
       .n('refunded', 'commerce.notify', 'Refund confirmation', {
@@ -523,7 +535,9 @@ export function storefrontOrderFlow(): Flow {
       .e('capture.failed', 'uncaptured')
       .e('shipped', 'window')
       .e('window.timeout', 'done')
-      .e('window.received', 'rma')
+      .e('window.received', 'goods_back')
+      .e('goods_back.true', 'rma')
+      .e('goods_back.false', 'refund')
       .e('rma', 'send_label')
       .e('send_label', 'back')
       .e('back.received', 'restock')
@@ -583,6 +597,10 @@ export function marketplaceOrderFlow(): Flow {
         event: 'return.requested',
         timeout: '14 days',
       })
+      .n('goods_back', 'control.condition', 'Goods coming back?', {
+        // Only a claim with nothing to send back says false; anything else takes the label.
+        expression: { '!==': [{ var: 'vars.return_requested.goodsBack' }, false] },
+      })
       .n('rma', 'commerce.return_label', 'Return label', { carrier: 'ups' })
       .n('back', 'control.wait_event', 'Return received', {
         event: 'return.received',
@@ -592,7 +610,7 @@ export function marketplaceOrderFlow(): Flow {
         lines: { var: 'vars.return_requested.lines' },
       })
       .n('refund', 'commerce.refund', 'Refund', {
-        amount: { or: [{ var: 'vars.return_requested.amount' }, { var: 'order.total' }] },
+        amount: returnAmount,
         reason: '{{vars.return_requested.reason}}',
       })
       .n('payout', 'commerce.payout', 'Seller payouts')
@@ -658,7 +676,9 @@ export function marketplaceOrderFlow(): Flow {
       .e('capture.failed', 'uncaptured')
       .e('shipped', 'window')
       .e('window.timeout', 'payout')
-      .e('window.received', 'rma')
+      .e('window.received', 'goods_back')
+      .e('goods_back.true', 'rma')
+      .e('goods_back.false', 'refund')
       .e('rma', 'back')
       .e('back.received', 'restock')
       .e('back.timeout', 'payout')

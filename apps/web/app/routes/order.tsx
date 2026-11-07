@@ -5,6 +5,7 @@
  * the order go to the assistant panel, which this page tells which order it is on.
  */
 
+import type { ReturnInput } from '@orderloop/core';
 import {
   FULFILLMENT_METHOD_LABELS,
   mergeTimeline,
@@ -67,6 +68,7 @@ import { DecisionContext, DecisionControls } from '~/components/decision';
 import { FlowCanvas } from '~/components/flow-canvas';
 import { Inspector } from '~/components/inspector';
 import { Empty, Section } from '~/components/page';
+import { ReturnSheet } from '~/components/return-sheet';
 import { ShareButton } from '~/components/share-button';
 import { StatusBadge, StatusDot } from '~/components/status';
 import { approvalContext } from '~/lib/approvals';
@@ -279,6 +281,8 @@ function OrderView() {
       }
       if (method === 'cancel')
         return await act('cancel_order', { orderId: state.orderId, reason: args[0] });
+      if (method === 'return')
+        return await act('record_return', { orderId: state.orderId, ...(args[0] as ReturnInput) });
       if (method === 'deliver')
         return await act('deliver_event', {
           orderId: state.orderId,
@@ -1077,6 +1081,15 @@ function Actions({
                       ))}
                   </ul>
                 </ItemFooter>
+              ) : canOperate && w.event === 'return.requested' ? (
+                <ItemActions className="basis-full">
+                  <ReturnSheet
+                    order={state.order!}
+                    flow={state.flow}
+                    disabled={!!busy}
+                    onSubmit={(input) => call('return', 'return', [input])}
+                  />
+                </ItemActions>
               ) : canOperate ? (
                 <ItemActions className="basis-full">
                   <Button
@@ -1176,6 +1189,15 @@ function Details({ state, records }: { state: OrderState; records: Records }) {
   const o = state.order!;
   return (
     <div className="space-y-4">
+      {/* What people open an order to find, so it comes before the lines and the money. */}
+      <Ledger
+        title="Shipments"
+        rows={records.shipments.map((s) => [
+          `${s.carrier.toUpperCase()} ${s.tracking}`,
+          humanize(s.status),
+          '',
+        ])}
+      />
       <Section title="Lines" flush>
         {o.lines.length ? (
           <Table caption="Lines">
@@ -1345,14 +1367,6 @@ function RecordSections({ records, currency }: { records: Records; currency: str
           `${p.name ?? p.sellerId} (${money(p.commission, currency)} commission)`,
           humanize(p.status),
           money(p.net, currency),
-        ])}
-      />
-      <Ledger
-        title="Shipments"
-        rows={records.shipments.map((s) => [
-          `${s.carrier.toUpperCase()} ${s.tracking}`,
-          humanize(s.status),
-          '',
         ])}
       />
       <Ledger

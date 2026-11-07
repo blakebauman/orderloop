@@ -34,6 +34,7 @@ export * from './pricing';
 export * from './promotions';
 export * from './provenance';
 export * from './redact';
+export * from './returns';
 export * from './roles';
 export * from './scenarios';
 export * from './shipping';

@@ -115,8 +115,9 @@ sent until you press the confirm button, and declining leaves everything as it w
 |---|---|---|
 | `decide_approval` | `approver` | Approves or rejects the approval an order waits on, with an optional note |
 | `decide_approvals` | `approver` | Approves or rejects up to 25 open approvals on one card, with one note; each is decided on its own, and one that can't be is skipped with the reason |
-| `deliver_event` | `operator` | Delivers a business event to the order waiting for it, optionally with up to 20 flat fields it carries, each value at most 120 characters and shown quoted on the card. The fields a source writes itself (`by`, `event`, `at`, `outcome`, `source`, `provider`, `invoiceId`, `paymentIntentId`, `note`) are refused |
+| `deliver_event` | `operator` | Delivers a business event to the order waiting for it (not `return.requested`, which `record_return` records), optionally with up to 20 flat fields it carries, each value at most 120 characters and shown quoted on the card. The fields a source writes itself (`by`, `event`, `at`, `outcome`, `source`, `provider`, `invoiceId`, `paymentIntentId`, `note`, `goodsBack`) are refused |
 | `cancel_order` | `operator` | Cancels the order and undoes what it did, as [Cancelling](/guides/approvals-and-events/#cancelling) |
+| `record_return` | `operator` | Records a return or claim on an order waiting for one: a reason, the items and quantities, and optionally the amount to refund, as [Returns and claims](/guides/approvals-and-events/#returns-and-claims). Only in the app, never over MCP or A2A |
 | `submit_cart` | `operator` | Submits a priced cart as an order of its flow, as [Submit as order](/guides/carts/#locking-submitting-and-cancelling) |
 | `publish_flow` | `operator` | Publishes the flow's saved draft as the next version |
 | `run_stock_review` | `operator` | Starts the stock review now |
@@ -132,7 +133,7 @@ These four change what buyers pay or owe in tax, so a person always confirms the
 card, through an MCP confirmation, or with `{ "confirm": true }` in an A2A chat. They aren't typed
 A2A skills. Only a signed-in person verifies a certificate, never an API token.
 | `set_member_role` | `admin` | Changes a person's role. Lowering it revokes their API tokens above the new role; making someone an admin needs a step-up |
-| `set_approval_separation` | `admin` | Sets whether people may approve their own orders and verify certificates they added |
+| `set_approval_separation` | `admin` | Sets whether people may approve their own orders, verify certificates they added, and record a claim with nothing to send back on an order they started |
 | `set_plugin_enabled` | `admin` | Turns an installed plugin on or off (a person confirms it's them; an admin token may turn one off) |
 | `approve_plugin` | `admin` | Installs an uploaded or drafted plugin version; needs a step-up |
 | `rollback_plugin` | `admin` | Runs an earlier version of a plugin again; needs a step-up |

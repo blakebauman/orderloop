@@ -25,6 +25,9 @@ import {
   PROMOTION_KINDS,
   type Principal,
   pluginCasesSchema,
+  RETURN_NOTE_MAX,
+  RETURN_REASON_CODES,
+  type ReturnReason,
   ROLES,
 } from '@orderloop/core';
 import {
@@ -99,6 +102,7 @@ export const RESERVED_EVENT_FIELDS = new Set([
   'invoiceId',
   'paymentIntentId',
   'note',
+  'goodsBack',
 ]);
 
 export const TOOL_INPUTS = {
@@ -211,6 +215,16 @@ export const TOOL_INPUTS = {
       .describe('What the event carries, e.g. { "sellerId": "…", "decision": "accepted" }'),
   }),
   cancel_order: z.object({ orderId, reason: z.string() }),
+  record_return: z.object({
+    orderId,
+    reasonCode: z.enum(RETURN_REASON_CODES as [ReturnReason, ...ReturnReason[]]),
+    lines: z
+      .array(z.object({ sku: z.string().min(1).max(120), qty: z.number().positive() }))
+      .min(1)
+      .max(100),
+    amount: z.number().min(0.01).optional(),
+    note: z.string().max(RETURN_NOTE_MAX).optional(),
+  }),
   submit_cart: z.object({
     cartId,
     cartVersion: z
@@ -535,6 +549,7 @@ export const TOOL_OUTPUTS = {
   }),
   deliver_event: actionOutput,
   cancel_order: actionOutput,
+  record_return: actionOutput,
   submit_cart: actionOutput,
   publish_flow: actionOutput,
   run_stock_review: actionOutput,
@@ -577,6 +592,7 @@ export const ACTION_TOOLS: ActionTool[] = [
   'decide_approvals',
   'deliver_event',
   'cancel_order',
+  'record_return',
   'submit_cart',
   'publish_flow',
   'run_stock_review',

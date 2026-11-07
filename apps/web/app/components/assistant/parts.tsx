@@ -432,6 +432,7 @@ const VERB: Record<string, (input: Record<string, unknown>) => string> = {
   decide_approvals: (i) => (i.decision === 'rejected' ? 'Reject all' : 'Approve all'),
   deliver_event: () => 'Deliver event',
   cancel_order: () => 'Cancel order',
+  record_return: () => 'Record it',
   submit_cart: () => 'Submit cart',
   publish_flow: () => 'Publish',
   run_stock_review: () => 'Run review',

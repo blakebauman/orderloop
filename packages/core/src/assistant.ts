@@ -69,6 +69,7 @@ export type AssistantTool =
   | 'decide_approvals'
   | 'deliver_event'
   | 'cancel_order'
+  | 'record_return'
   | 'submit_cart'
   | 'publish_flow'
   | 'run_stock_review'
@@ -249,6 +250,14 @@ export const ASSISTANT_TOOLS: Record<
     title: 'Cancel an order',
     description:
       'Cancel an order and undo what it did (release stock, void payment, cancel shipments).',
+  },
+  record_return: {
+    role: 'operator',
+    confirm: true,
+    label: 'Record a return or claim',
+    title: 'Record a return or claim',
+    description:
+      'Record a return or claim on an order waiting for one: the reason, the items and quantities, and optionally the amount to refund.',
   },
   submit_cart: {
     role: 'operator',
@@ -541,14 +550,16 @@ export const PERSON_CONFIRMS_TOOLS: readonly AssistantTool[] = [
 ];
 
 /**
- * Who may do what on the team: only a person signed in to the app, through the assistant panel
- * (or the Team page's own button). Never offered over MCP or A2A, where a connected app (an OAuth
- * grant, `kind: 'user'`) or a token could confirm its own call.
+ * Who may do what on the team, and a return or claim (one with nothing to send back refunds at
+ * once): only a person signed in to the app, through the assistant panel (or a page's own button).
+ * Never offered over MCP or A2A, where a connected app (an OAuth grant, `kind: 'user'`) or a token
+ * could confirm its own call.
  */
 export const PANEL_ONLY_TOOLS: readonly AssistantTool[] = [
   'set_member_role',
   'set_approval_separation',
   'set_assistant_routing',
+  'record_return',
 ];
 
 export const isPanelOnly = (name: AssistantTool) => PANEL_ONLY_TOOLS.includes(name);
