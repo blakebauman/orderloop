@@ -132,6 +132,28 @@ non-alphanumerics replaced by `_`: `payment.received` → `vars.payment_received
 flow's Refund node, for example, takes `vars.return_requested.amount`. OrderLoop adds `event` and
 `at` (epoch ms) to every delivered payload.
 
+### Returns and claims
+
+When an order waits for a return request, its Waiting panel offers **Record a return or claim**.
+Choose a reason, the items and quantities, and optionally a different refund and a note; the
+assistant's card then shows what will happen, and nothing happens until you confirm.
+
+A return is the buyer's choice (changed their mind, wrong size or fit, not as described). A claim
+says something went wrong (damaged, faulty, wrong item, missing from the delivery, lost in
+transit). The refund defaults to what the chosen items cost, without shipping or tax. It must be
+above zero and can't be more than the order total.
+
+Claims for items missing from the delivery or lost in transit have nothing to send back, so the
+built-in flows skip the label and the restock and refund straight away, at the **Goods coming
+back?** step. These two reasons are only offered on an order whose flow has that step. Orders on
+an older published flow keep waiting for goods, so publish the flow again to offer them. With
+approval separation on, whoever started the order can't record these two claims.
+
+The request reaches the flow as `vars.return_requested`, with `kind`, `reasonCode`, `reason`,
+`goodsBack`, `lines`, `amount` and `note`. Only a request recorded here can set `goodsBack`: the
+API and connected systems can still deliver `return.requested`, but that always waits for the
+goods before any refund.
+
 ### Delivering an event
 
 An event is delivered to whichever node is waiting for that event name. If none is, nothing
