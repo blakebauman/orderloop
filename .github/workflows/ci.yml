@@ -69,8 +69,10 @@ jobs:
   # The web app in WebKit as an iPhone and an iPad, both ways up, and a desktop: layout, safe
   # areas, touch targets and the on-screen keyboard (apps/web/e2e). The dev server runs offline
   # (mock AI, no remote bindings, its own seeded database), so no Cloudflare account is needed.
+  # Pinned: the cached WebKit links the image's own libraries (ICU), and ubuntu-latest moving to
+  # 26.04 left it unable to start. Move it on purpose, once Playwright supports the new image.
   devices:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -80,19 +82,22 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # The browser download is cached by Playwright version, so it is fetched only on a miss. The
+      # The browser download is cached by Playwright version and Ubuntu release (a build for one
+      # release can't load another's system libraries), so it is fetched only on a miss. The
       # system libraries come from apt, which the runner's Ubuntu mirror sometimes serves very
       # slowly (two runs spent all 25 minutes there), so that step has its own short timeout and
       # one retry instead of the job's whole budget.
       - name: Resolve the Playwright version
         id: playwright
-        run: echo "version=$(pnpm --filter @orderloop/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(pnpm --filter @orderloop/web exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+          echo "os=$(. /etc/os-release && echo "$ID-$VERSION_ID")" >> "$GITHUB_OUTPUT"
       - name: Cache WebKit
         id: webkit
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-webkit-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-webkit-${{ steps.playwright.outputs.os }}-${{ steps.playwright.outputs.version }}
       - name: Download WebKit
         if: ${{ steps.webkit.outputs.cache-hit != 'true' }}
         timeout-minutes: 5
