@@ -20,6 +20,7 @@ import {
   type FlowGraph,
   type FlowProposal,
   flowGraphSchema,
+  flowReadsGoodsBack,
   graphDiff,
   isPanelOnly,
   ORDER_MODEL_LABELS,
@@ -28,8 +29,11 @@ import {
   type OrderModel,
   type OrderState,
   type Principal,
+  RETURN_NOTE_MAX,
+  type ReturnInput,
   ROLE_LABELS,
   type Role,
+  returnRequest,
   TERMINAL_ORDER_STATUSES,
   validateGraph,
 } from '@orderloop/core';
@@ -292,6 +296,28 @@ async function loadOrder(env: Env, ref: string) {
   return { id, s };
 }
 
+const RETURN_BY_RECORD =
+  'Record a return or claim from the order page, so its card shows the refund.';
+
+/** A return or claim checked against the order as it stands, or why it can't be recorded. */
+async function planReturn(env: Env, i: ActionInput['record_return'], p: Principal) {
+  const { id, s } = await loadOrder(env, i.orderId);
+  const wait = s.waits.find((x) => x.kind === 'event' && x.event === 'return.requested');
+  if (!wait) return { id, s, issue: `${orderRef(id)} isn't waiting for a return.` };
+  const checked = returnRequest(i, { lines: s.order?.lines ?? [], total: s.order?.total });
+  if ('issue' in checked) return { id, s, issue: checked.issue };
+  if (!checked.request.goodsBack && !flowReadsGoodsBack(s.flow))
+    return {
+      id,
+      s,
+      issue: `This order's flow always waits for goods to come back. Publish a flow with the “Goods coming back?” step first.`,
+    };
+  // Nothing comes back to prove the claim, so with separation on a second person records it.
+  if (!checked.request.goodsBack && (await separationRefusal(env, id, p.id)))
+    return { id, s, issue: 'You started this order, so someone else must record this claim.' };
+  return { id, s, wait, request: checked.request };
+}
+
 /**
  * Typed questions about one order, answered with a probability per option. Images are limited to
  * this order's documents (or https and data URLs), as for the Assess node.
@@ -516,6 +542,7 @@ export type ActionInput = {
   };
   deliver_event: { orderId: string; event: string; payload?: EventPayload };
   cancel_order: { orderId: string; reason: string };
+  record_return: { orderId: string } & ReturnInput;
   submit_cart: { cartId: string; cartVersion?: number };
   publish_flow: { flowId: string };
   run_stock_review: Record<string, never>;
@@ -619,6 +646,14 @@ export async function previewAction<T extends ActionTool>(
         const { id, s } = await loadOrder(env, i.orderId);
         const w = s.waits.find((x) => x.kind === 'event' && x.event === i.event);
         const next = w ? nextStep(s, w.nodeId) : null;
+        // This card can't say what the request refunds; `record_return`'s does.
+        if (i.event === 'return.requested')
+          return {
+            title: `Deliver ${i.event} to ${orderRef(id)}`,
+            href: `/orders/${id}`,
+            consequences: [],
+            blocked: roleBlock ?? RETURN_BY_RECORD,
+          };
         return {
           title: `Deliver ${i.event} to ${orderRef(id)}`,
           href: `/orders/${id}`,
@@ -642,6 +677,27 @@ export async function previewAction<T extends ActionTool>(
                     ? ` It waits for: ${s.waits.map((x) => x.event ?? x.title).join(', ')}.`
                     : ''
                 }`),
+        };
+      }
+      case 'record_return': {
+        const i = input as ActionInput['record_return'];
+        const { id, s, wait, request, issue } = await planReturn(env, i, p);
+        const next = wait ? nextStep(s, wait.nodeId) : null;
+        return {
+          title: `Record a ${request?.kind ?? 'return'} on ${orderRef(id)}`,
+          href: `/orders/${id}`,
+          consequences: request
+            ? [
+                `Reason: ${request.reason}`,
+                ...request.lines.map((l) => `${l.qty} × ${boundText(l.sku, 120)}`),
+                request.goodsBack
+                  ? `Refunds ${money(request.amount, s.order?.currency)} once the goods arrive`
+                  : `Refunds ${money(request.amount, s.order?.currency)} now: nothing comes back`,
+                ...(request.note ? [`Note: “${boundText(request.note, RETURN_NOTE_MAX)}”`] : []),
+                next ? `Then ${next} runs` : 'The order continues from there',
+              ]
+            : [],
+          blocked: roleBlock ?? issue,
         };
       }
       case 'cancel_order': {
@@ -883,6 +939,7 @@ export async function runAction<T extends ActionTool>(
     }
     case 'deliver_event': {
       const i = input as ActionInput['deliver_event'];
+      if (i.event === 'return.requested') throw new Refused(RETURN_BY_RECORD);
       const { id } = await loadOrder(env, i.orderId);
       // Its source and `by` last: the payload never names who or what delivered it.
       const r = await orderAgent(env, id).deliver(i.event, {
@@ -898,6 +955,31 @@ export async function runAction<T extends ActionTool>(
           event: i.event,
           nodeId: r.nodeId,
           ...(i.payload ? { payload: boundPayload(i.payload) } : {}),
+          ...trail,
+        },
+      });
+      return { done: preview.title, href: preview.href };
+    }
+    case 'record_return': {
+      const i = input as ActionInput['record_return'];
+      const { id, request, issue } = await planReturn(env, i, p);
+      if (!request) throw new Refused(issue ?? `${orderRef(id)} isn't waiting for a return.`);
+      // Its source and `by` last, as for any event: the request never names who delivered it.
+      const r = await orderAgent(env, id).recordReturn(request, {
+        source: AUDIT_CHANNEL[channel],
+        by,
+      });
+      if (!r.delivered) throw new Refused(`${orderRef(id)} isn't waiting for a return.`);
+      await recordAudit(env, 'order.event_delivered', {
+        actor: p,
+        target: id,
+        detail: {
+          event: 'return.requested',
+          nodeId: r.nodeId,
+          kind: request.kind,
+          reasonCode: request.reasonCode,
+          amount: request.amount,
+          lines: request.lines.length,
           ...trail,
         },
       });

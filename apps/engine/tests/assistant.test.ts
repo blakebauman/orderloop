@@ -1,6 +1,7 @@
 import { introspectWorkflow, runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import {
+  APPROVAL_SEPARATION_KEY,
   type Attention,
   type OrderInput,
   type OrderState,
@@ -8,7 +9,15 @@ import {
   type Principal,
   type ProxiedPrincipal,
 } from '@orderloop/core';
-import { approvals, auditEvents, createDb, flows, sessions, users } from '@orderloop/db';
+import {
+  approvals,
+  auditEvents,
+  createDb,
+  flows,
+  sessions,
+  users,
+  workspaceSettings,
+} from '@orderloop/db';
 import { and, eq } from 'drizzle-orm';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { type AssistantAgent, answeredOnly, DIRECT, readContext } from '../src/assistant/agent';
@@ -1004,5 +1013,111 @@ describe('assistant socket', () => {
       error: 'Your sign-in has ended. Reload the page to sign in again.',
     });
     mine.close();
+  });
+});
+
+describe('record_return', () => {
+  async function returnable(startedBy?: string) {
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      startedBy,
+      input: {
+        model: 'b2c',
+        channel: 'api',
+        customerId: 'cus_ada',
+        title: 'Return test',
+        lines: [{ sku: 'MON-27', qty: 2 }],
+      },
+    });
+    await until(
+      async () => (await state(orderId)).waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    return orderId;
+  }
+
+  it('previews the request, then delivers what the engine built', async () => {
+    const op = strip(await who('operator', 'returns-op@example.com'));
+    const orderId = await returnable();
+    const input = {
+      orderId,
+      reasonCode: 'damaged' as const,
+      lines: [{ sku: 'MON-27', qty: 1 }],
+      note: 'Cracked',
+    };
+    const preview = await previewAction(env, op, 'record_return', input);
+    expect(preview.blocked).toBeUndefined();
+    expect(preview.consequences).toContain('Reason: Arrived damaged');
+    await runAction(env, op, 'record_return', input, 'assistant', { bound: null });
+    const vars = await until(
+      async () => (await state(orderId)).vars?.return_requested as Record<string, unknown>,
+      'the request in the order variables',
+    );
+    expect(vars).toMatchObject({ kind: 'claim', reasonCode: 'damaged' as const, goodsBack: true });
+    expect(vars.lines).toEqual([{ sku: 'MON-27', qty: 1 }]);
+    expect(vars.by).toBeTruthy();
+  });
+
+  it('blocks more than was ordered and refuses it when run anyway', async () => {
+    const op = strip(await who('operator', 'returns-over@example.com'));
+    const orderId = await returnable();
+    const input = { orderId, reasonCode: 'faulty' as const, lines: [{ sku: 'MON-27', qty: 3 }] };
+    expect((await previewAction(env, op, 'record_return', input)).blocked).toMatch(/Only 2/);
+    await expect(
+      runAction(env, op, 'record_return', input, 'assistant', { bound: null }),
+    ).rejects.toThrow(/Only 2/);
+    expect((await state(orderId)).waits.some((w) => w.event === 'return.requested')).toBe(true);
+  });
+
+  it('leaves return.requested to record_return, whose card states the refund', async () => {
+    const op = strip(await who('operator', 'returns-raw@example.com'));
+    const orderId = await returnable();
+    const raw = { orderId, event: 'return.requested' };
+    expect((await previewAction(env, op, 'deliver_event', raw)).blocked).toMatch(/order page/);
+    await expect(runAction(env, op, 'deliver_event', raw, 'MCP')).rejects.toThrow(/order page/);
+    expect((await state(orderId)).waits.some((w) => w.event === 'return.requested')).toBe(true);
+  });
+
+  it('holds a no-goods claim for a second person with separation on', async () => {
+    const maker = strip(await who('operator', 'returns-maker@example.com'));
+    const other = strip(await who('operator', 'returns-other@example.com'));
+    const orderId = await returnable(maker.id);
+    const claim = {
+      orderId,
+      reasonCode: 'short_shipped' as const,
+      lines: [{ sku: 'MON-27', qty: 1 }],
+    };
+    expect((await previewAction(env, maker, 'record_return', claim)).blocked).toBeUndefined();
+    await db().insert(workspaceSettings).values({
+      key: APPROVAL_SEPARATION_KEY,
+      value: 'on',
+      updatedAt: Date.now(),
+      updatedBy: 'test',
+    });
+    try {
+      expect((await previewAction(env, maker, 'record_return', claim)).blocked).toMatch(
+        /someone else/,
+      );
+      await expect(
+        runAction(env, maker, 'record_return', claim, 'assistant', { bound: null }),
+      ).rejects.toThrow(/someone else/);
+      // Goods coming back are their own check, and anyone else may record the claim.
+      const goods = { ...claim, reasonCode: 'damaged' as const };
+      expect((await previewAction(env, maker, 'record_return', goods)).blocked).toBeUndefined();
+      expect((await previewAction(env, other, 'record_return', claim)).blocked).toBeUndefined();
+    } finally {
+      await db()
+        .delete(workspaceSettings)
+        .where(eq(workspaceSettings.key, APPROVAL_SEPARATION_KEY));
+    }
+  });
+
+  it('is never run over MCP or A2A', async () => {
+    const op = strip(await who('operator', 'returns-mcp@example.com'));
+    const orderId = await returnable();
+    const input = { orderId, reasonCode: 'faulty' as const, lines: [{ sku: 'MON-27', qty: 1 }] };
+    await expect(runAction(env, op, 'record_return', input, 'MCP')).rejects.toThrow();
+    await expect(runAction(env, op, 'record_return', input, 'A2A')).rejects.toThrow();
+    expect((await state(orderId)).waits.some((w) => w.event === 'return.requested')).toBe(true);
   });
 });

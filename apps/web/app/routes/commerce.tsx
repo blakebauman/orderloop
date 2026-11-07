@@ -979,6 +979,13 @@ function EventRow({ e, onRecorded }: { e: EventItem; onRecorded: () => void }) {
                 Answer per seller
               </Link>
             </Button>
+          ) : e.event === 'return.requested' ? (
+            // The items, reason and refund are asked for on the order page.
+            <Button asChild size="sm" variant="outline">
+              <Link to={`/orders/${e.orderId}`} aria-describedby={`${titleId} ${waitId}`}>
+                Record a return or claim
+              </Link>
+            </Button>
           ) : delivered ? (
             <span role="status" className="inline-flex items-center gap-1.5 font-medium text-ok">
               <Check className="size-4" aria-hidden="true" /> Recorded

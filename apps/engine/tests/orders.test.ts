@@ -815,6 +815,61 @@ describe('storefront order', () => {
     expect(await stock('GSK-010')).toBe(before.gsk - 5);
   });
 
+  it('refunds a claim with nothing to send back without a label or a restock', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({ model: 'b2c', customerId: 'cus_ada', lines: [{ sku: 'MON-27', qty: 2 }] }),
+    });
+    await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    const before = await stock('MON-27');
+    await agent(orderId).recordReturn(
+      {
+        kind: 'claim',
+        reasonCode: 'short_shipped',
+        goodsBack: false,
+        amount: 50,
+        reason: 'Missing from the delivery',
+        lines: [{ sku: 'MON-27', qty: 1 }],
+      },
+      { source: 'test', by: 'test' },
+    );
+    const done = await settled(orderId);
+    expect(done.status).toBe('completed');
+    expect(done.nodes.refund!.status).toBe('succeeded');
+    expect(done.nodes.rma?.status).not.toBe('succeeded');
+    expect(done.nodes.restock?.status).not.toBe('succeeded');
+    expect(await stock('MON-27')).toBe(before);
+  });
+
+  // Every outside route comes through `deliver`: none may skip the wait for the goods.
+  it('ignores goodsBack on a delivered event, and reads a zero amount as zero', async () => {
+    await introspect();
+    const { orderId } = await startOrder(env, {
+      flowId: 'tpl-storefront-order',
+      input: input({ model: 'b2c', customerId: 'cus_ada', lines: [{ sku: 'MON-27', qty: 2 }] }),
+    });
+    await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.requested'),
+      'return window',
+    );
+    await agent(orderId).deliver('return.requested', { goodsBack: false, amount: 0 });
+    const held = await waitingOn(
+      orderId,
+      (s) => s.waits.some((w) => w.event === 'return.received'),
+      'return received wait',
+    );
+    expect(held.nodes.refund?.status).not.toBe('succeeded');
+    await agent(orderId).deliver('return.received');
+    const done = await settled(orderId);
+    expect(done.vars?.refunded ?? 0).toBe(0);
+  });
+
   it('cancels before authorizing when the store policy fails', async () => {
     await introspect();
     const { orderId } = await startOrder(env, {

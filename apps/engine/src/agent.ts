@@ -5,6 +5,7 @@
  * about an order go to the workspace assistant (./assistant), which reads and acts on it here.
  */
 
+import type { ReturnRequest } from '@orderloop/core';
 import {
   aiGateFeedback,
   atLeast,
@@ -624,9 +625,29 @@ export class OrderAgent extends Agent<Env, State> {
     return { ok: true };
   }
 
-  /** Deliver a business event (e.g. "payment.received") to whichever node waits for it. */
+  /**
+   * Deliver a business event (e.g. "payment.received") to whichever node waits for it. Every outside
+   * route comes through here, so `goodsBack` goes: only `recordReturn` may say nothing is coming
+   * back, since that sends a flow straight to its refund.
+   */
   @callable()
   async deliver(event: string, payload: Record<string, unknown> = {}) {
+    if (payload && typeof payload === 'object' && 'goodsBack' in payload) {
+      const { goodsBack: _dropped, ...rest } = payload;
+      return this.deliverEvent(event, rest);
+    }
+    return this.deliverEvent(event, payload);
+  }
+
+  /**
+   * A return or claim a person confirmed on the assistant's card. Not `@callable`: only the engine
+   * reaches it, after `returnRequest` has checked it against the order.
+   */
+  async recordReturn(request: ReturnRequest, meta: { source: string; by: string }) {
+    return this.deliverEvent('return.requested', { ...request, ...meta });
+  }
+
+  private async deliverEvent(event: string, payload: Record<string, unknown>) {
     const caller = await this.authorize('operator');
     // The payload lands in the order's variables, every broadcast and the next generation.
     if (typeof event !== 'string' || !event || event.length > 100)
