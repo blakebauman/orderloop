@@ -1,0 +1,14 @@
+// A throwaway deployment for catalog benchmarks and scale tests (`pnpm catalog:bench bench`), so
+// they never write to orderloop.app. A 1M-product run on production wrote about 237M Durable Object
+// rows in two days (2026-10-24/25), about $187 over the account's 50M included; 25,000 products is
+// enough for a benchmark. No customer data, mocked payments, no plugins. See docs/testing.md,
+// "Catalog benchmark".
+{
+  "id": "bench",
+  "ring": "internal",
+  "slot": 3,
+  "domain": "bench.orderloop.app",
+  // Held until `./scripts/provision.sh bench` has written its d1Id and catalogKvId: without them
+  // the whole CI plan stops. Remove it in the change that commits those ids.
+  "hold": true
+}
