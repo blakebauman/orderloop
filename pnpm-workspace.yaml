@@ -31,12 +31,12 @@ catalog:
   json-logic-js: ^2.0.5
 
   # Agents
-  agents: ^0.30.1
+  agents: ^0.33.0
   '@cloudflare/ai-chat': 0.12.2
-  ai: 7.0.139
+  ai: 7.0.163
   '@ai-sdk/react': 4.0.142
   '@ai-sdk/provider': 4.0.27
-  streamdown: 2.7.0
+  streamdown: 2.7.1
   # The assistant panel's Message Scroller (components/ai-elements/message-scroller.tsx).
   '@shadcn/react': 0.3.1
   # The code block's highlighter (app/lib/highlighter.tsx), loaded only when a block shows.
